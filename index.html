@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <title>SIGAP | Sistem Informasi Agenda & Persuratan</title>
+    <meta name="description" content="Solusi digital terintegrasi untuk pengelolaan agenda pimpinan dan administrasi surat-menyurat secara cepat dan akurat." />
+    <meta name="author" content="SIGAP Developer Team" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="SIGAP - Cepat, Tanggap, Terintegrasi" />
+    <meta property="og:description" content="Digitalisasi agenda dan manajemen persuratan dalam satu aplikasi." />
+    <meta property="og:image" content="/og-image.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+      :root {
+        --font-sigap: 'Inter', -apple-system, sans-serif;
+      }
+      
+      body {
+        font-family: var(--font-sigap);
+        background-color: #fcfcfd; /* Subtle off-white */
+        margin: 0;
+        -webkit-font-smoothing: antialiased;
+        color: #0f172a;
+      }
+
+      /* Loading State CSS */
+      #root {
+        min-height: 100vh;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

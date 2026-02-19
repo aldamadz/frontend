@@ -1,0 +1,288 @@
+import React, { useState, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { 
+  FileText, 
+  Loader2, 
+  Search,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle,
+  Eye,
+  XCircle,
+  MessageSquare
+} from "lucide-react";
+import { suratService } from "@/services/surat.service";
+import { supabase } from "@/lib/supabase";
+import { PreviewModal } from "@/components/surat/PreviewModal";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea"; 
+import { toast } from "sonner";
+
+export default function InboxPage() {
+  const queryClient = useQueryClient();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  
+  // State untuk Preview & Notes
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [notes, setNotes] = useState<{ [key: string]: string }>({});
+  
+  // Ref untuk autofocus ke textarea jika catatan kosong saat reject
+  const noteRefs = useRef<{ [key: string]: HTMLTextAreaElement | null }>({});
+
+  // 1. DATA INBOX
+  const { data: inbox = [], isLoading: loading } = useQuery({
+    queryKey: ['surat-inbox'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Unauthorized");
+      return await suratService.getMyInbox(user.id);
+    },
+    staleTime: 30000,
+  });
+
+  // 2. PROFIL USER
+  const { data: currentUser } = useQuery({
+    queryKey: ['user-profile-inbox'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .single();
+      return { ...user, full_name: profile?.full_name };
+    }
+  });
+
+  const filteredInbox = inbox.filter((item: any) => 
+    item.surat_registrasi.judul_surat.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    item.surat_registrasi.no_surat?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // FUNGSI APPROVE
+  const handleApprove = async (item: any) => {
+    if (!currentUser?.full_name) {
+      toast.error("Profil tidak lengkap.");
+      return;
+    }
+
+    setProcessingId(item.id);
+    try {
+      const note = notes[item.id] || "";
+      const result = await suratService.approveSurat(
+        item.id, 
+        item.surat_id, 
+        item.surat_registrasi.current_step, 
+        currentUser.full_name,
+        note 
+      );
+      
+      toast.success(result.isDone ? "Dokumen Selesai!" : "Berhasil diteruskan.");
+      queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
+    } catch (error: any) {
+      console.error("Approve Error:", error);
+      toast.error(error.message || "Gagal menyetujui dokumen.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  // FUNGSI REJECT
+  const handleReject = async (item: any) => {
+    const note = notes[item.id];
+    
+    // Validasi catatan wajib diisi untuk penolakan
+    if (!note || note.trim().length < 5) {
+      toast.error("Catatan Wajib Diisi", {
+        description: "Harap masukkan alasan penolakan minimal 5 karakter pada kolom catatan."
+      });
+      // Fokuskan ke textarea yang bersangkutan
+      noteRefs.current[item.id]?.focus();
+      return;
+    }
+
+    setProcessingId(item.id);
+    try {
+      await suratService.rejectSurat(item.id, item.surat_id, note);
+      
+      toast.error("Dokumen Ditolak", {
+        description: "Alur dokumen telah dihentikan secara permanen.",
+      });
+      
+      queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
+    } catch (error: any) {
+      console.error("Reject Error:", error);
+      toast.error(error.message || "Gagal menolak dokumen.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const openPreview = (url: string) => {
+    if (!url) return;
+    const cleanUrl = url.split('?')[0]; 
+    const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(cleanUrl)}&wdPrint=0&wdEmbedCode=0&cb=${Date.now()}`;
+    setPreviewUrl(viewerUrl);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-[80vh] flex-col items-center justify-center space-y-4">
+        <Loader2 className="w-8 h-8 animate-spin text-primary/40" />
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground text-center">
+          Synchronizing Secure Inbox
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-6 md:p-10 space-y-10 animate-in fade-in duration-700">
+      
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-border pb-8">
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-8 bg-primary rounded-full" />
+            <h1 className="text-3xl font-black text-foreground tracking-tighter uppercase">
+              Inbox <span className="text-primary/50 font-light tracking-widest">Approval</span>
+            </h1>
+          </div>
+          <div className="flex items-center gap-2 ml-5">
+            <Badge variant="outline" className="rounded-none border-primary/30 text-primary text-[9px] font-black px-2 py-0">
+              {inbox.length} QUEUE
+            </Badge>
+          </div>
+        </div>
+
+        <div className="relative w-full md:w-80">
+          <Search className="absolute left-0 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+          <Input 
+            placeholder="FILTER QUEUE..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-8 h-10 bg-transparent border-0 border-b border-border rounded-none focus-visible:ring-0 uppercase text-[11px] font-bold tracking-widest"
+          />
+        </div>
+      </div>
+
+      {/* LIST SECTION */}
+      <div className="max-w-6xl mx-auto space-y-6">
+        {filteredInbox.length === 0 ? (
+          <div className="h-64 flex flex-col items-center justify-center border border-dashed border-border rounded-3xl opacity-50">
+            <ShieldCheck size={32} className="text-muted-foreground mb-4" />
+            <h2 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.5em]">Inbox is Empty</h2>
+          </div>
+        ) : (
+          filteredInbox.map((item: any) => (
+            <div key={item.id} className="group flex flex-col overflow-hidden transition-all bg-card border border-border rounded-xl shadow-sm hover:border-primary/40">
+              
+              <div className="grid grid-cols-1 md:grid-cols-12">
+                {/* Sidebar Info */}
+                <div className="md:col-span-2 bg-muted/30 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-border">
+                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Sequence</span>
+                  <span className="text-4xl font-light text-foreground tabular-nums tracking-tighter">0{item.step_order}</span>
+                  <Badge className="mt-4 rounded-none bg-primary/10 text-primary border-none text-[8px] font-black px-2">
+                    {item.role_name}
+                  </Badge>
+                </div>
+
+                {/* Content Area */}
+                <div className="md:col-span-7 p-6 flex flex-col justify-between gap-6">
+                  <div className="flex items-start gap-4">
+                    <div className="hidden sm:flex w-12 h-12 rounded-xl bg-primary/5 items-center justify-center text-primary shrink-0 group-hover:bg-primary group-hover:text-white transition-colors duration-500">
+                      <FileText size={24} strokeWidth={1.5} />
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono font-bold text-primary">{item.surat_registrasi.no_surat || "PENDING/REF"}</span>
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                          • {new Date(item.surat_registrasi.created_at).toLocaleDateString('id-ID', {day: '2-digit', month: 'short', year: 'numeric'})}
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-bold text-foreground leading-tight uppercase truncate">{item.surat_registrasi.judul_surat}</h3>
+                    </div>
+                  </div>
+
+                  {/* NOTE INPUT SECTION */}
+                  <div className="relative group/note">
+                    <MessageSquare size={14} className="absolute left-3 top-3 text-muted-foreground group-focus-within/note:text-primary transition-colors" />
+                    <Textarea 
+                      ref={(el) => (noteRefs.current[item.id] = el)}
+                      placeholder="TAMBAHKAN CATATAN ATAU ALASAN PENOLAKAN..."
+                      value={notes[item.id] || ""}
+                      onChange={(e) => setNotes({...notes, [item.id]: e.target.value})}
+                      className="pl-10 min-h-[80px] text-[11px] font-medium bg-muted/20 border-none rounded-lg focus-visible:ring-1 focus-visible:ring-primary/30 resize-none uppercase tracking-wider"
+                    />
+                  </div>
+                </div>
+
+                {/* Actions Section */}
+                <div className="md:col-span-3 p-6 bg-muted/10 flex flex-col justify-center gap-2 border-t md:border-t-0 md:border-l border-border">
+                  <Button 
+                    variant="outline" 
+                    className="w-full h-10 text-[10px] font-black uppercase tracking-widest hover:bg-muted"
+                    onClick={() => openPreview(item.surat_registrasi.file_path)}
+                  >
+                    <Eye size={14} className="mr-2" /> Preview
+                  </Button>
+
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <Button 
+                      variant="destructive"
+                      disabled={processingId === item.id}
+                      onClick={() => handleReject(item)}
+                      className="h-10 text-[9px] font-black uppercase tracking-widest shadow-sm active:scale-95"
+                    >
+                      {processingId === item.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <span className="flex items-center gap-1"><XCircle size={12}/>Tolak</span>
+                      )}
+                    </Button>
+
+                    <Button 
+                      disabled={processingId === item.id}
+                      onClick={() => handleApprove(item)}
+                      className="h-10 text-[9px] font-black uppercase tracking-widest shadow-md active:scale-95 bg-emerald-600 hover:bg-emerald-500 text-white border-none transition-all"
+                    >
+                      {processingId === item.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <span className="flex items-center gap-1">Setujui<ArrowRight size={12}/></span>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* FOOTER */}
+      <div className="max-w-6xl mx-auto flex items-start gap-4 p-8 border border-border rounded-3xl bg-muted/5">
+        <AlertCircle className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+        <div className="space-y-1">
+          <h3 className="text-sm font-bold uppercase tracking-wider">Protokol Persetujuan</h3>
+          <p className="text-[11px] leading-relaxed text-muted-foreground font-medium">
+            Dengan menekan <span className="text-emerald-500 font-bold uppercase">Setujui</span>, 
+            tanda tangan digital Anda akan dibubuhi stempel waktu dan dokumen diteruskan ke tahap berikutnya. 
+            Menekan <span className="text-destructive font-bold uppercase">Tolak</span> mengharuskan 
+            Anda mengisi alasan pada kolom catatan untuk menghentikan alur pengajuan.
+          </p>
+        </div>
+      </div>
+
+      <PreviewModal 
+        isOpen={!!previewUrl} 
+        fileUrl={previewUrl || ""} 
+        onClose={() => setPreviewUrl(null)} 
+      />
+    </div>
+  );
+}

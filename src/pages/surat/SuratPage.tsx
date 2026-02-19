@@ -1,0 +1,183 @@
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { 
+  CheckCircle2, 
+  History, 
+  Info, 
+  FilePlus, 
+  ArrowRightCircle, 
+  ShieldCheck, 
+  Stamp, 
+  Send,
+  AlertTriangle,
+  AlertCircle,
+  Download,
+  Copy,
+  Check
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SuratForm } from "@/components/surat/SuratForm";
+import { SuratStatusCard } from "@/components/surat/SuratStatusCard";
+import { toast } from "sonner"; 
+
+export default function SuratPage() {
+  const [generatedNo, setGeneratedNo] = useState<string | null>(null);
+  const [judulDisplay, setJudulDisplay] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const navigate = useNavigate();
+
+  const handleCopyNoSurat = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setIsCopied(true);
+      toast.success("Nomor surat tersalin ke clipboard");
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      toast.error("Gagal menyalin nomor");
+    }
+  };
+
+  const handleSuccess = (noSurat: string, judul: string) => {
+    setGeneratedNo(noSurat);
+    setJudulDisplay(judul);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="container mx-auto py-8 px-4 max-w-6xl space-y-8 animate-in fade-in duration-500">
+      
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 border-b border-border pb-8">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-extrabold tracking-tighter flex items-center gap-3 uppercase">
+              <FilePlus className="text-primary w-8 h-8 drop-shadow-[0_0_15px_rgba(59,130,246,0.4)]" /> 
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
+                Registrasi Surat
+              </span>
+            </h1>
+          </div>
+          <p className="text-muted-foreground text-sm font-medium">
+            Alokasi nomor otomatis & inisiasi alur persetujuan digital Marison Group.
+          </p>
+        </div>
+        
+        <Button 
+          variant="outline" 
+          onClick={() => navigate("/surat/monitoring")} 
+          className="group relative px-6 font-bold text-[11px] uppercase tracking-[0.15em] border-primary/30 bg-primary/5 hover:bg-primary hover:text-primary-foreground transition-all duration-300 shadow-sm"
+        >
+          <History className="w-4 h-4 mr-2 transition-transform group-hover:-rotate-45" /> 
+          Monitoring Registrasi
+        </Button>
+      </div>
+
+      {generatedNo && (
+        <div className="animate-in slide-in-from-top-4 duration-500 space-y-4">
+          <Alert className="bg-success/10 border-success/30 shadow-glow flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex gap-3">
+              <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
+              <div>
+                <AlertTitle className="text-success font-black uppercase text-xs tracking-widest">Registrasi Berhasil</AlertTitle>
+                <AlertDescription className="text-foreground/80 font-medium">
+                  Dokumen telah diterbitkan dengan nomor resmi sistem.
+                </AlertDescription>
+              </div>
+            </div>
+
+            <div 
+              onClick={() => handleCopyNoSurat(generatedNo)}
+              className="flex items-center gap-2 bg-background/50 hover:bg-background border border-border p-2 rounded-lg cursor-pointer transition-all group active:scale-95"
+            >
+              <code className="text-xs font-bold text-primary px-2">{generatedNo}</code>
+              <div className="border-l pl-2 border-border">
+                {isCopied ? (
+                  <Check className="w-4 h-4 text-success" />
+                ) : (
+                  <Copy className="w-4 h-4 text-muted-foreground group-hover:text-primary" />
+                )}
+              </div>
+            </div>
+          </Alert>
+          
+          <SuratStatusCard 
+            noSurat={generatedNo} 
+            judul={judulDisplay} 
+            tanggal={new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} 
+          />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <div className="lg:col-span-3">
+          <SuratForm 
+            onSuccess={handleSuccess} 
+            isLoading={isLoading} 
+            setIsLoading={setIsLoading} 
+            setJudulForDisplay={setJudulDisplay}
+          />
+        </div>
+
+<div className="space-y-6">
+  <Card className="glass-card border-none overflow-hidden elevated-card">
+    <CardHeader className="bg-secondary/50 pb-4 border-b border-border/50">
+      <CardTitle className="text-[10px] font-black flex items-center gap-2 uppercase tracking-[0.2em] text-primary">
+        <Info className="w-4 h-4" /> Prosedur Dokumen Excel
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="pt-6 px-5 space-y-6">
+      
+      <div className="space-y-6 relative before:absolute before:inset-0 before:left-[11px] before:border-l-2 before:border-muted before:my-2">
+        {/* STEP 1 */}
+        <div className="relative pl-8 group">
+          <div className="absolute left-0 top-0 w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center border-2 border-background ring-1 ring-primary/50 shadow-sm">
+            <Download className="w-3 h-3 text-primary" />
+          </div>
+          <h4 className="text-xs font-bold text-foreground uppercase tracking-tight">1. Persiapan Template</h4>
+          <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+            Unduh template <span className="font-bold text-foreground">.xlsx</span>, isi detail perihal, lalu unggah kembali ke sistem.
+          </p>
+        </div>
+
+        {/* STEP 2 */}
+        <div className="relative pl-8 group">
+          <div className="absolute left-0 top-0 w-6 h-6 bg-warning/10 rounded-full flex items-center justify-center border-2 border-background ring-1 ring-warning/50">
+            <ShieldCheck className="w-3 h-3 text-warning" />
+          </div>
+          <h4 className="text-xs font-bold text-foreground uppercase tracking-tight">2. Verifikasi Berjenjang</h4>
+          <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+            Persetujuan dilakukan secara digital oleh pejabat terkait sesuai alur Matrix Approval.
+          </p>
+        </div>
+
+        {/* STEP 3 */}
+        <div className="relative pl-8 group">
+          <div className="absolute left-0 top-0 w-6 h-6 bg-success/10 rounded-full flex items-center justify-center border-2 border-background ring-1 ring-success/50">
+            <Stamp className="w-3 h-3 text-success" />
+          </div>
+          <h4 className="text-xs font-bold text-foreground uppercase tracking-tight">3. Digital Stamping</h4>
+          <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+            Sistem otomatis membubuhkan nomor surat dan stempel digital langsung ke dalam file Excel Anda.
+          </p>
+        </div>
+      </div>
+
+      {/* FOOTER NOTE */}
+      <div className="pt-4 border-t border-border/50">
+        <div className="p-3 bg-primary/5 rounded-xl border border-primary/20 flex gap-3 items-start">
+          <AlertCircle className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+          <p className="text-[10px] text-primary font-bold leading-relaxed uppercase tracking-tight">
+            Pastikan format file tetap <span className="underline">.xlsx</span> dan tidak diubah menjadi PDF agar stempel dapat diproses.
+          </p>
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+</div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,254 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Enterprise Agenda System - Dark Mode Design System */
+/* All colors MUST be HSL - No italics policy enforced globally */
+
+@layer base {
+  /* Global No-Italic Policy */
+  * {
+    font-style: normal !important;
+  }
+
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 217 33% 20%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 158 64% 40%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 43 96% 56%;
+    --warning-foreground: 222 47% 6%;
+
+    --overdue: 0 84% 60%;
+    --overdue-foreground: 210 40% 98%;
+
+    --pending: 217 91% 60%;
+    --pending-foreground: 222 47% 6%;
+
+    --ongoing: 158 64% 40%;
+    --ongoing-foreground: 210 40% 98%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.75rem;
+
+    --chart-1: 217 91% 60%;
+    --chart-2: 158 64% 40%;
+    --chart-3: 43 96% 56%;
+    --chart-4: 0 72% 51%;
+    --chart-5: 280 65% 60%;
+
+    --sidebar-background: 222 47% 7%;
+    --sidebar-foreground: 210 40% 85%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 217 33% 14%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 14%;
+    --sidebar-ring: 217 91% 60%;
+
+    /* Custom Shadows */
+    --shadow-card: 0 4px 24px -4px hsl(222 47% 3% / 0.5);
+    --shadow-elevated: 0 8px 32px -8px hsl(222 47% 3% / 0.6);
+    --shadow-glow: 0 0 40px -12px hsl(217 91% 60% / 0.3);
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%), hsl(217 91% 50%));
+    --gradient-success: linear-gradient(135deg, hsl(158 64% 40%), hsl(158 64% 35%));
+    --gradient-card: linear-gradient(180deg, hsl(222 47% 10%), hsl(222 47% 8%));
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  /* Custom scrollbar for dark theme (Main) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+}
+
+@layer components {
+  /* UI Containers */
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+    box-shadow: var(--shadow-card);
+  }
+
+  .elevated-card {
+    @apply bg-card border border-border;
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .glow-effect {
+    box-shadow: var(--shadow-glow);
+  }
+
+  /* Status Badges */
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold;
+  }
+
+  .status-pending { @apply bg-pending/20 text-pending border border-pending/30; }
+  .status-ongoing { @apply bg-ongoing/20 text-ongoing border border-ongoing/30; }
+  .status-completed { @apply bg-success/20 text-success border border-success/30; }
+  .status-overdue { @apply bg-overdue/20 text-overdue border border-overdue/30; }
+
+  /* Calendar Logic & Scoped Scrollbar */
+  .calendar-cell-container {
+    @apply flex flex-col h-full min-h-0 w-full overflow-hidden;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px; /* Ultra slim for calendar cells */
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 20px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-primary/40;
+  }
+
+  .calendar-cell {
+    @apply min-h-[100px] border border-border/50 bg-card/50 p-2 transition-all duration-200;
+  }
+
+  .calendar-cell:hover {
+    @apply bg-accent/50 border-primary/30;
+  }
+
+  .calendar-cell-today {
+    @apply ring-2 ring-primary/50 bg-primary/5;
+  }
+
+  /* KPI & Nav Items */
+  .kpi-card {
+    @apply relative overflow-hidden rounded-xl p-6;
+    background: var(--gradient-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .kpi-card::before {
+    content: '';
+    @apply absolute inset-0 opacity-50;
+    background: radial-gradient(circle at top right, hsl(var(--primary) / 0.1), transparent 50%);
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-muted-foreground transition-all duration-200;
+  }
+
+  .nav-item:hover { @apply bg-accent text-foreground; }
+  .nav-item.active { @apply bg-primary/10 text-primary border-l-2 border-primary; }
+
+  /* Agenda Specifics */
+  .agenda-item {
+    @apply p-4 rounded-lg border border-border bg-card transition-all duration-200;
+  }
+
+  .agenda-item:hover {
+    @apply border-primary/30 shadow-lg;
+    box-shadow: var(--shadow-card);
+  }
+
+  .drag-handle { @apply cursor-grab active:cursor-grabbing; }
+}
+
+@layer utilities {
+  .grid-auto-rows-\[minmax\(160px\2c 250px\)\] {
+    grid-auto-rows: minmax(160px, 250px);
+  }
+
+  /* Standard Line Clamp Properties */
+  .line-clamp-1 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    overflow: hidden;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-primary);
+  }
+
+  /* Scrollbar Behavior Utilities */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Animations */
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-glow {
+    animation: glow 2s ease-in-out infinite alternate;
+  }
+
+  @keyframes glow {
+    from { box-shadow: 0 0 20px -10px hsl(var(--primary) / 0.5); }
+    to { box-shadow: 0 0 30px -5px hsl(var(--primary) / 0.7); }
+  }
+}
