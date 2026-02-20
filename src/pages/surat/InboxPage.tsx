@@ -9,7 +9,8 @@ import {
   AlertCircle,
   Eye,
   XCircle,
-  MessageSquare
+  MessageSquare,
+  Paperclip // Icon tambahan untuk lampiran
 } from "lucide-react";
 import { suratService } from "@/services/surat.service";
 import { supabase } from "@/lib/supabase";
@@ -95,12 +96,10 @@ export default function InboxPage() {
   const handleReject = async (item: any) => {
     const note = notes[item.id];
     
-    // Validasi catatan wajib diisi untuk penolakan
     if (!note || note.trim().length < 5) {
       toast.error("Catatan Wajib Diisi", {
         description: "Harap masukkan alasan penolakan minimal 5 karakter pada kolom catatan."
       });
-      // Fokuskan ke textarea yang bersangkutan
       noteRefs.current[item.id]?.focus();
       return;
     }
@@ -108,11 +107,9 @@ export default function InboxPage() {
     setProcessingId(item.id);
     try {
       await suratService.rejectSurat(item.id, item.surat_id, note);
-      
       toast.error("Dokumen Ditolak", {
         description: "Alur dokumen telah dihentikan secara permanen.",
       });
-      
       queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
     } catch (error: any) {
       console.error("Reject Error:", error);
@@ -122,11 +119,18 @@ export default function InboxPage() {
     }
   };
 
+  // FUNGSI PREVIEW FILE UTAMA (EXCEL)
   const openPreview = (url: string) => {
     if (!url) return;
     const cleanUrl = url.split('?')[0]; 
     const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(cleanUrl)}&wdPrint=0&wdEmbedCode=0&cb=${Date.now()}`;
     setPreviewUrl(viewerUrl);
+  };
+
+  // FUNGSI LIHAT LAMPIRAN (PDF/IMAGE/DLL)
+  const openLampiran = (url: string) => {
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   if (loading) {
@@ -223,12 +227,24 @@ export default function InboxPage() {
 
                 {/* Actions Section */}
                 <div className="md:col-span-3 p-6 bg-muted/10 flex flex-col justify-center gap-2 border-t md:border-t-0 md:border-l border-border">
+                  
+                  {/* TOMBOL LAMPIRAN (BARU) */}
+                  {item.surat_registrasi.lampiran_path && (
+                    <Button 
+                      variant="outline" 
+                      className="w-full h-10 text-[10px] font-black uppercase tracking-widest border-blue-500/30 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+                      onClick={() => openLampiran(item.surat_registrasi.lampiran_path)}
+                    >
+                      <Paperclip size={14} className="mr-2" /> Lihat Lampiran
+                    </Button>
+                  )}
+
                   <Button 
                     variant="outline" 
                     className="w-full h-10 text-[10px] font-black uppercase tracking-widest hover:bg-muted"
                     onClick={() => openPreview(item.surat_registrasi.file_path)}
                   >
-                    <Eye size={14} className="mr-2" /> Preview
+                    <Eye size={14} className="mr-2" /> Preview Utama
                   </Button>
 
                   <div className="grid grid-cols-2 gap-2 mt-2">

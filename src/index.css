@@ -206,6 +206,46 @@
   .grid-auto-rows-\[minmax\(160px\2c 250px\)\] {
     grid-auto-rows: minmax(160px, 250px);
   }
+  
+  .star {
+    animation: twinkle linear infinite;
+  }
+
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.2; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.2); }
+  }
+
+  .shooting-star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 5px #fff, 0 0 10px #fff;
+    animation: animate-shooting 10s linear infinite; /* Sangat lambat */
+    opacity: 0;
+  }
+
+  .shooting-star::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 200px;
+    height: 1px;
+    background: linear-gradient(90deg, #fff, transparent);
+  }
+
+  .delay-slow { animation-delay: 4s; }
+  .delay-v-slow { animation-delay: 7s; }
+
+  @keyframes animate-shooting {
+    0% { transform: rotate(315deg) translateX(0); opacity: 0; }
+    5% { opacity: 1; }
+    15% { transform: rotate(315deg) translateX(-600px); opacity: 0; }
+    100% { transform: rotate(315deg) translateX(-1000px); opacity: 0; }
+  }
 
   /* Standard Line Clamp Properties */
   .line-clamp-1 {

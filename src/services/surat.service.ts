@@ -59,7 +59,19 @@ cleanUuid(id: any) {
     };
 
     const formalRole = ROLE_MAPPING[roleClean] || roleClean;
-
+    if (usageDetail.ttd_config && Array.isArray(usageDetail.ttd_config)) {
+      const dynamicMatch = usageDetail.ttd_config.find(
+        (cfg: any) => cfg.roleName.trim() === roleClean
+      );
+      if (dynamicMatch) {
+        return [{
+          ttd: dynamicMatch.ttd,
+          nama: dynamicMatch.nama,
+          jabatan: dynamicMatch.jabatan,
+          labelJabatan: dynamicMatch.labelJabatan || formalRole
+        }];
+      }
+    }
     // Helper untuk mengecek apakah role user ada di dalam kolom database (split , atau /)
     const isRoleMatch = (dbValue: string) => {
       if (!dbValue) return false;
@@ -236,7 +248,13 @@ const { data: nextNumber, error: rpcError } = await supabase.rpc('get_smart_sequ
       CREATE REGISTRASI
   ========================================================= */
 
-async createRegistrasi(payload: any, signers: any[], file: File | null) {
+// Tambahkan lampiranFile sebagai parameter ke-4
+async createRegistrasi(
+  payload: any, 
+  signers: any[], 
+  file: File | null, 
+  lampiranFile?: File | null // <-- Tambahkan parameter ini
+) {
   try {
     const cleanPayload = {
       ...payload,
@@ -249,26 +267,30 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
     };
 
     // 1. Validasi Cabang/Proyek
-    if (cleanPayload.office_id && !cleanPayload.project_id) {
+    if (cleanPayload.office_id && cleanPayload.office_id !== 'pusat' && !cleanPayload.project_id) {
       throw new Error("Untuk pengajuan Cabang/KCP, Proyek wajib dipilih.");
     }
 
-    /**
-     * 2. GENERATE / VERIFIKASI NOMOR
-     * Jika form sudah punya no_surat (hasil booking), gunakan itu.
-     * Jika belum (misal bypass booking), generate nomor baru via smart sequence.
-     */
+    // 2. Generate / Verifikasi Nomor
     if (!cleanPayload.no_surat) {
       cleanPayload.no_surat = await this.generateNoSurat(cleanPayload);
     }
 
-    // 3. Upload File jika ada
+    // 3. Upload File Utama (Excel)
     if (file) {
       const fileUrl = await this.uploadFile(file);
       cleanPayload.file_path = fileUrl;
     }
 
-    // 4. Insert ke tabel Utama (surat_registrasi)
+    // 4. UPLOAD LAMPIRAN WAJIB (Jika ada)
+    if (lampiranFile) {
+      // Anda bisa menggunakan fungsi uploadFile yang sama atau buat folder berbeda
+      const lampiranUrl = await this.uploadFile(lampiranFile); 
+      // Simpan URL ke kolom lampiran_path (pastikan kolom ini ada di tabel surat_registrasi)
+      cleanPayload.lampiran_path = lampiranUrl;
+    }
+
+    // 5. Insert ke tabel Utama (surat_registrasi)
     const { data: surat, error: suratError } = await supabase
       .from("surat_registrasi")
       .insert(cleanPayload)
@@ -277,8 +299,7 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
 
     if (suratError) throw suratError;
 
-    // 5. UPDATE STATUS RESERVASI MENJADI 'USED'
-    // Mengunci nomor di tabel reservations agar tidak bisa di-recycle lagi
+    // 6. UPDATE STATUS RESERVASI MENJADI 'USED'
     const noUrut = parseInt(cleanPayload.no_surat.split('/')[0]);
     const currentYear = new Date().getFullYear();
 
@@ -292,11 +313,9 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
         no_urut: noUrut 
       });
 
-    if (resError) {
-      console.warn("Gagal memperbarui status reservasi, namun data registrasi berhasil disimpan.", resError);
-    }
+    if (resError) console.warn("Reservasi error:", resError);
 
-    // 6. Insert ke tabel Signatures (Workflow)
+    // 7. Insert ke tabel Signatures (Workflow)
     const signerPayload = signers
       .filter(s => s.user_id)
       .map(s => ({
@@ -323,27 +342,31 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
   }
 },
 
-  async stampApprovalExcel(
+async stampApprovalExcel(
     suratId: string,
     currentFilePath: string,
     userName: string,
     roleName: string,
     usageId: string
   ): Promise<string> {
-    // 1. Ambil detail penggunaan (siapa yang membuat, memeriksa, menyetujui)
+    // 1. Ambil detail penggunaan
+    // PENTING: ttd_config harus di-select agar resolveStampPositions bisa menggunakannya
     const { data: usageDetail } = await supabase
       .from("master_penggunaan_detail")
-      .select("membuat, memeriksa, menyetujui")
+      .select("membuat, memeriksa, menyetujui, ttd_config")
       .eq("id", usageId)
       .single();
 
-    if (!usageDetail) return currentFilePath;
+    if (!usageDetail) {
+      console.warn("⚠️ Detail penggunaan tidak ditemukan.");
+      return currentFilePath;
+    }
 
-    // 2. Bersihkan path file (ambil path relatif untuk storage)
+    // 2. Bersihkan path file
     const relativePath = this.getRelativePath(currentFilePath);
     console.log("🔍 Memulai proses stamp untuk file:", relativePath);
 
-    // 3. Download file dengan logika Retry (3x percobaan)
+    // 3. Download file dengan logika Retry
     let fileData: Blob | null = null;
     let downloadError: any = null;
     
@@ -361,7 +384,6 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
 
       fileData = data;
       downloadError = null;
-      console.log(`✅ File berhasil diunduh pada percobaan ke-${attempt}`);
       break;
     }
 
@@ -375,20 +397,21 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
     const worksheet = workbook.worksheets[0];
     if (!worksheet) return currentFilePath;
 
-    // 5. Cari SEMUA posisi yang harus di-stamp (Array)
+    // 5. Cari posisi stamp
+    // Fungsi ini sekarang akan otomatis memproses ttd_config (JSON) 
+    // atau Fallback ke kolom string (membuat/memeriksa/menyetujui) dengan pemisah , atau /
     const positions = this.resolveStampPositions(
       worksheet,
       usageDetail,
       roleName.trim()
     );
 
-    // Jika role tidak terdaftar di master_penggunaan_detail untuk dokumen ini, lewati
     if (!positions || positions.length === 0) {
-      console.log("ℹ️ Role tidak memiliki posisi stamp pada dokumen ini.");
+      console.log(`ℹ️ Role "${roleName}" tidak memiliki tugas stamping pada dokumen ini.`);
       return currentFilePath;
     }
 
-    // 6. Proses Iterasi Stamping (Bisa lebih dari 1 jika diperlukan)
+    // 6. Proses Iterasi Stamping
     const now = new Date();
     const dateStr = now.toLocaleDateString("id-ID");
     const timeStr = now.toLocaleTimeString("id-ID", {
@@ -409,45 +432,36 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
         horizontal: 'center'
       };
       
-      // Atur tinggi baris (Target row dari cell TTD)
+      // Auto-height untuk row TTD
       const rowNum = parseInt(pos.ttd.match(/\d+/)?.[0] || '35');
       const ttdRow = worksheet.getRow(rowNum);
       if (ttdRow.height === undefined || ttdRow.height < 60) {
         ttdRow.height = 60; 
       }
 
-      // Set Nama User (Upper Case)
+      // Set Nama User
       const namaCell = worksheet.getCell(pos.nama);
       namaCell.value = userName.toUpperCase();
-      namaCell.alignment = {
-        vertical: 'middle',
-        horizontal: 'center'
-      };
+      namaCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-      // Set Jabatan (Hasil konversi formal, misal: BM -> Branch Manager)
+      // Set Jabatan
       const jabatanCell = worksheet.getCell(pos.jabatan);
       jabatanCell.value = pos.labelJabatan; 
-      jabatanCell.alignment = {
-        vertical: 'middle',
-        horizontal: 'center'
-      };
+      jabatanCell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
 
-    // 7. Generate Buffer hasil revisi
+    // 7. Generate Buffer
     const buffer = await workbook.xlsx.writeBuffer();
 
-    // 8. Logika Versioning File (Menghindari Cache & Menjaga History)
+    // 8. Logika Versioning
     const pathParts = relativePath.split('/');
     const originalFileName = pathParts[pathParts.length - 1];
     const fileNameNoExt = originalFileName.replace('.xlsx', '');
     const newFileName = `${fileNameNoExt}_v${Date.now()}.xlsx`;
     
-    // Gabungkan kembali pathnya
     const newRelativePath = pathParts.length > 1 
       ? `${pathParts.slice(0, -1).join('/')}/${newFileName}`
       : newFileName;
-
-    console.log("📤 Mengunggah versi terbaru ke:", newRelativePath);
 
     // 9. Upload ke Supabase Storage
     const { error: uploadError } = await supabase.storage
@@ -458,17 +472,14 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
         upsert: true
       });
 
-    if (uploadError) {
-      console.error("❌ Gagal upload file baru:", uploadError);
-      throw uploadError;
-    }
+    if (uploadError) throw uploadError;
 
-    // 10. Dapatkan Public URL baru
+    // 10. Ambil Public URL baru
     const { data: { publicUrl } } = supabase.storage
       .from("dokumen_surat")
       .getPublicUrl(newRelativePath);
 
-    // 11. Update database surat_registrasi dengan path baru
+    // 11. Update database
     const { error: updateError } = await supabase
       .from("surat_registrasi")
       .update({ 
@@ -477,12 +488,8 @@ async createRegistrasi(payload: any, signers: any[], file: File | null) {
       })
       .eq("id", suratId);
 
-    if (updateError) {
-      console.error("❌ Gagal update database:", updateError);
-      throw updateError;
-    }
+    if (updateError) throw updateError;
 
-    console.log("✅ Proses stamp selesai. URL baru:", publicUrl);
     return publicUrl;
   },
 
@@ -560,39 +567,66 @@ async rejectSurat(signatureId: string, suratId: string, note: string) {
   ========================================================= */
 
 async getMyInbox(userId: string) {
-    const { data, error } = await supabase
-      .from("surat_signatures")
-      .select(`
-        id,
-        role_name,
-        step_order,
-        is_signed,
-        surat_id,
-        surat_registrasi!inner (
-          id, no_surat, judul_surat, file_path, current_step, status, created_at, penggunaan_id
-        )
-      `)
-      .eq("user_id", userId)
-      .eq("is_signed", false);
+    try {
+      const { data, error } = await supabase
+        .from("surat_signatures")
+        .select(`
+          id,
+          role_name,
+          step_order,
+          is_signed,
+          surat_id,
+          surat_registrasi!inner (
+            id, 
+            no_surat, 
+            judul_surat, 
+            file_path, 
+            lampiran_path, 
+            current_step, 
+            status, 
+            created_at, 
+            penggunaan_id
+          )
+        `)
+        .eq("user_id", userId)
+        .eq("is_signed", false);
 
-    if (error) throw error;
+      if (error) throw error;
+      if (!data) return [];
 
-    return (data || [])
-      .map((sig: any) => {
-        const surat = Array.isArray(sig.surat_registrasi) ? sig.surat_registrasi[0] : sig.surat_registrasi;
-        if (!surat || sig.step_order !== surat.current_step) return null;
+      return data
+        .map((sig: any) => {
+          // 1. Handle kemungkinan data surat dalam bentuk array atau objek tunggal
+          const surat = Array.isArray(sig.surat_registrasi) 
+            ? sig.surat_registrasi[0] 
+            : sig.surat_registrasi;
+          
+          // 2. Filter Ketat: Hanya tampilkan jika surat ada DAN giliran langkah user tersebut
+          // Gunakan Number() untuk menghindari error tipe data string vs number
+          if (!surat) return null;
+          if (Number(sig.step_order) !== Number(surat.current_step)) return null;
 
-        return {
-          ...sig,
-          surat_registrasi: {
-            ...surat,
-            file_path: surat.file_path ? `${surat.file_path}?cb=${Date.now()}` : null
-          }
-        };
-      })
-      .filter(Boolean);
+          // 3. Tambahkan Cache Busting pada file_path untuk menghindari cache browser saat preview
+          const timestamp = Date.now();
+          const cleanFilePath = surat.file_path 
+            ? `${surat.file_path}${surat.file_path.includes('?') ? '&' : '?'}cb=${timestamp}` 
+            : null;
+
+          return {
+            ...sig,
+            surat_registrasi: {
+              ...surat,
+              file_path: cleanFilePath,
+              lampiran_path: surat.lampiran_path || null
+            }
+          };
+        })
+        .filter(Boolean); // Membuang nilai null dari hasil map
+    } catch (err) {
+      console.error("Inbox Fetch Error:", err);
+      return [];
+    }
   },
-
 
   /* =========================================================
      UPLOAD FILE
@@ -669,7 +703,7 @@ async getMasterData() {
 
 async downloadFilledTemplate(payload: any, templateLink: string) {
   try {
-    // 1. Ambil Nama Label untuk mengisi L4 dan L5
+    // 1. Ambil Nama Label dari Database untuk mengisi informasi header
     const [officeRes, projectRes, deptRes] = await Promise.all([
       payload.office_id && payload.office_id !== "pusat" 
         ? supabase.from("master_offices").select("name").eq("id", payload.office_id).maybeSingle() 
@@ -693,24 +727,53 @@ async downloadFilledTemplate(payload: any, templateLink: string) {
 
     if (!worksheet) throw new Error("Sheet tidak ditemukan di dalam file template.");
 
-    // 4. Injeksi Data sesuai permintaan Anda
+    // --- 4. LOGIKA CHECKLIST (B4 & E4) ---
+    // Kita buat border manual karena Shape/Rectangle sering hilang saat proses load/save ExcelJS
+    const cellB4 = worksheet.getCell("B4");
+    const cellE4 = worksheet.getCell("E4");
+
+    const checklistStyle: Partial<ExcelJS.Style> = {
+      alignment: { vertical: 'middle', horizontal: 'center' },
+      border: {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      },
+      font: { name: 'Arial', size: 10, bold: true }
+    };
+
+    // Terapkan style ke sel B4 dan E4
+    cellB4.style = checklistStyle;
+    cellE4.style = checklistStyle;
+
+    // Injeksi tanda centang berdasarkan kolom 'is_aset'
+    if (payload.is_aset === true) {
+      cellB4.value = "V";
+      cellE4.value = "";
+    } else {
+      cellB4.value = "";
+      cellE4.value = "V";
+    }
+
+    // --- 5. INJEKSI DATA LAINNYA ---
     // Cell D5: No Surat (Contoh: ": 001/UAI/...")
     worksheet.getCell("D5").value = `: ${payload.no_surat}`;
 
     if (payload.office_id && payload.office_id !== "pusat") {
-      // Jika Cabang
+      // Kondisi untuk Cabang/Proyek
       const namaCabang = officeRes?.data?.name || "";
       const namaProyek = projectRes?.data?.name || "";
       worksheet.getCell("L4").value = `: KC. ${namaCabang}`;
       worksheet.getCell("L5").value = `: ${namaProyek}`;
     } else {
-      // Jika Pusat
+      // Kondisi untuk Pusat/Departemen
       const namaDept = deptRes?.data?.name || "";
       worksheet.getCell("L4").value = `: ${namaDept}`;
       worksheet.getCell("L5").value = ": -";
     }
 
-    // 5. Proses Pembuatan File Baru (Download)
+    // --- 6. PROSES DOWNLOAD ---
     const buffer = await workbook.xlsx.writeBuffer();
     const downloadBlob = new Blob([buffer], { 
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
@@ -719,13 +782,15 @@ async downloadFilledTemplate(payload: any, templateLink: string) {
     const url = window.URL.createObjectURL(downloadBlob);
     const a = document.createElement("a");
     a.href = url;
-    // Format nama file: NoSurat_Tanggal.xlsx
+    
+    // Sanitize No Surat untuk nama file agar tidak error di OS tertentu
     const cleanNoSurat = payload.no_surat.replace(/[/\\?%*:|"<>]/g, '-');
     a.download = `Form_${cleanNoSurat}.xlsx`;
+    
     document.body.appendChild(a);
     a.click();
     
-    // Cleanup
+    // Cleanup resources
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
 

@@ -12,6 +12,13 @@ import { RealtimeSync } from "@/providers/RealtimeSync";
 
 // STATIC IMPORT
 import LoginPage from "@/pages/auth/LoginPage"; 
+import DepartmentManagementPage from "./pages/admin/DepartmentManagementPage";
+import EntityManagementPage from "./pages/admin/EntityManagementPage";
+import FormManagementPage from "./pages/admin/FormManagementPage";
+import LetterTypeManagementPage from "./pages/admin/LetterTypeManagementPage";
+import OfficeManagementPage from "./pages/admin/OfficeManagementPage";
+import WorkflowDetailManagementPage from "./pages/admin/WorkflowDetailManagementPage";
+import MasterProjectManagementPage from "./pages/admin/ProjectManagementPage";
 
 // LAZY IMPORT
 const DashboardPage = lazy(() => import("@/pages/dashboard/DashboardPage"));
@@ -102,6 +109,15 @@ const App = () => {
               <Route path="/surat/monitoring" element={<MonitoringPage />} />
               
               <Route path="/admin/users" element={<UserManagementPage />} />
+              <Route path="/admin/departments" element={<DepartmentManagementPage />} />
+              <Route path="/admin/entities" element={<EntityManagementPage />} />
+              <Route path="/admin/forms" element={<FormManagementPage />} />
+              <Route path="/admin/letter-types" element={<LetterTypeManagementPage />} />
+              <Route path="/admin/offices" element={<OfficeManagementPage />} />
+              <Route path="/admin/workflow-details" element={<WorkflowDetailManagementPage />} />
+              <Route path="/admin/master-projects" element={<MasterProjectManagementPage />} />
+              
+
             </Route>
 
             <Route path="*" element={<NotFound />} />

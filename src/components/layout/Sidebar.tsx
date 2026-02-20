@@ -18,6 +18,12 @@ import {
   SearchCheck,
   ChevronDown,
   Mail,
+  Database,
+  Building,
+  Tag,
+  MapPin,
+  GitMerge,
+  Briefcase
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -35,19 +41,26 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
+  
   const [user, setUser] = useState<User | null>(null)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [inboxCount, setInboxCount] = useState<number>(0)
+  
+  // State untuk Dropdown Submenu
   const [isSuratOpen, setIsSuratOpen] = useState(false)
+  const [isMasterOpen, setIsMasterOpen] = useState(false)
 
-  // Auto-open submenu jika sedang berada di route surat
+  // 1. Auto-open submenus berdasarkan URL aktif
   useEffect(() => {
     if (location.pathname.startsWith('/surat')) {
       setIsSuratOpen(true)
     }
+    if (location.pathname.startsWith('/admin/departments') || location.pathname.startsWith('/admin/users')) {
+      setIsMasterOpen(true)
+    }
   }, [location.pathname])
 
-  // 1. Load User
+  // 2. Load Data User
   useEffect(() => {
     const loadUser = async () => {
       const data = await getCurrentUser()
@@ -56,7 +69,7 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     loadUser()
   }, [])
 
-  // 2. Fetch Inbox Count & Real-time
+  // 3. Fetch Inbox Count & Real-time Subscription
   useEffect(() => {
     if (!user?.id) return;
 
@@ -83,8 +96,17 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
 
     const channel = supabase
       .channel('sidebar-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'surat_signatures', filter: `user_id=eq.${user.id}` }, () => fetchInboxCount())
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_registrasi' }, () => fetchInboxCount())
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'surat_signatures', 
+        filter: `user_id=eq.${user.id}` 
+      }, () => fetchInboxCount())
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'surat_registrasi' 
+      }, () => fetchInboxCount())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -107,7 +129,6 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     }
   }
 
-  // Helper untuk NavLink
   const renderNavLink = (path: string, label: string, Icon: any, isSubItem = false) => (
     <NavLink 
       to={path} 
@@ -166,10 +187,10 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
           </div>
           {!collapsed && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-<h1 className="font-bold text-foreground leading-none">SIGAP Digital</h1>
-<p className="text-[10px] text-muted-foreground mt-1 font-medium italic">
-  Cepat • Tanggap • Terintegrasi
-</p>
+              <h1 className="font-bold text-foreground leading-none">SIGAP Digital</h1>
+              <p className="text-[10px] text-muted-foreground mt-1 font-medium italic">
+                Cepat • Tanggap • Terintegrasi
+              </p>
             </motion.div>
           )}
         </div>
@@ -180,19 +201,17 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
 
       {/* NAVIGATION */}
       <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto scrollbar-none">
-        {/* Main Section */}
         <div className="space-y-1">
           {renderNavLink('/dashboard', 'Dashboard', LayoutDashboard)}
           {renderNavLink('/calendar', 'Calendar', Calendar)}
           {renderNavLink('/agenda', 'Agendas', ClipboardList)}
         </div>
 
-        {/* E-Surat Section with Submenu */}
+        {/* E-Surat Section */}
         <div className="pt-2 space-y-1">
           {!collapsed && (
              <p className="px-3 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest mb-2">Internal Correspondence</p>
           )}
-          
           <div className="space-y-1">
             <button
               onClick={() => !collapsed && setIsSuratOpen(!isSuratOpen)}
@@ -207,9 +226,6 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
               </div>
               {!collapsed && (
                 <ChevronDown className={cn("w-4 h-4 transition-transform duration-200", isSuratOpen && "rotate-180")} />
-              )}
-              {collapsed && inboxCount > 0 && (
-                 <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-sidebar" />
               )}
             </button>
 
@@ -233,21 +249,60 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         {/* Admin Section */}
         {user?.role === 'admin' && (
           <div className="pt-4 space-y-1">
-             {!collapsed && (
-               <p className="px-3 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest mb-2">Administration</p>
-             )}
-            {renderNavLink('/admin/users', 'Organization', Users)}
+            {!collapsed && (
+              <p className="px-3 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest mb-2">Administration</p>
+            )}
+            
+            <div className="space-y-1">
+              <button
+                onClick={() => !collapsed && setIsMasterOpen(!isMasterOpen)}
+                className={cn(
+                  "w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors group",
+                  (location.pathname.includes('/admin/departments') || location.pathname.includes('/admin/users')) 
+                    ? "text-primary bg-primary/5" 
+                    : "text-muted-foreground hover:bg-accent"
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <Database className="w-5 h-5" />
+                  {!collapsed && <span className="text-sm font-medium">Master Data</span>}
+                </div>
+                {!collapsed && (
+                  <ChevronDown className={cn("w-4 h-4 transition-transform duration-200", isMasterOpen && "rotate-180")} />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {(isMasterOpen && !collapsed) && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden space-y-1"
+                  >
+                    {renderNavLink('/admin/users', 'User Organization', Users, true)}
+                    {renderNavLink('/admin/departments', 'Master Departemen', Building2, true)}
+                    {renderNavLink('/admin/entities', 'Master Entitas', Building, true)}
+                    {renderNavLink('/admin/forms', 'Master Form', FileSignature, true)}
+                    {renderNavLink('/admin/letter-types', 'Master Jenis Surat', Tag, true)}
+                    {renderNavLink('/admin/offices', 'Master Kantor Cabang', MapPin, true)}
+                    {renderNavLink('/admin/workflow-details', 'Workflow Matrix', GitMerge, true)}
+                    {renderNavLink('/admin/master-projects', 'Master Proyek', Briefcase, true)}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             {renderNavLink('/activity-logs', 'Activity Logs', Activity)}
           </div>
         )}
 
-        {/* Settings */}
         <div className="pt-2">
           {renderNavLink('/settings', 'Settings', Settings)}
         </div>
       </nav>
 
-      {/* FOOTER: USER & LOGOUT */}
+      {/* FOOTER */}
       <div className="p-3 bg-sidebar-accent/20 border-t border-sidebar-border mt-auto">
         {!collapsed && user && (
           <div className="mb-3 p-2 rounded-xl bg-background/50 border border-border/50 flex items-center gap-3">
