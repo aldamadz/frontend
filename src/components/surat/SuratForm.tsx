@@ -38,6 +38,28 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
   const [openMatrix, setOpenMatrix] = useState(false);
   const [lampiranFile, setLampiranFile] = useState<File | null>(null);
   
+const resetForm = () => {
+  // Reset data form utama
+  setFormData({
+    entity_id: "",
+    dept_id: "",
+    letter_type_id: "",
+    office_id: "pusat",
+    project_id: "",
+    judul_surat: "",
+    penggunaan_id: "",
+    is_aset: false
+  });
+
+  // Reset state pendukung
+  setGeneratedNoSurat(null);
+  setFile(null);
+  setLampiranFile(null);
+  setSelectedUsage(null);
+  setSigners([]);
+  setJudulForDisplay(""); // Jika perlu mengosongkan tampilan judul di parent
+};
+
   const [formData, setFormData] = useState({
     entity_id: "",
     dept_id: "",
@@ -209,6 +231,8 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
       }, signers, file, lampiranFile); 
 
       if (result) {
+        toast({ title: "Berhasil", description: "Dokumen berhasil didaftarkan" });
+        resetForm();
         onSuccess(result.no_surat, formData.judul_surat);
       }
     } catch (error: any) {
@@ -238,7 +262,7 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 rounded-3xl bg-muted/30 border border-border/50 backdrop-blur-sm">
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase tracking-tighter ml-1">Entitas</Label>
-              <Select disabled={!!generatedNoSurat} onValueChange={(v) => setFormData({...formData, entity_id: v})}>
+              <Select disabled={!!generatedNoSurat} value={formData.entity_id} onValueChange={(v) => setFormData({...formData, entity_id: v})}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border"><SelectValue placeholder="Pilih PT" /></SelectTrigger>
                 <SelectContent>{master.entities?.map((e: any) => <SelectItem key={e.id} value={e.id}>{e.code} - {e.name}</SelectItem>)}</SelectContent>
               </Select>
@@ -289,7 +313,7 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
 
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase tracking-tighter ml-1">Kategori Dokumen</Label>
-              <Select disabled={!!generatedNoSurat} onValueChange={(v) => setFormData({...formData, letter_type_id: v})}>
+              <Select disabled={!!generatedNoSurat} value={formData.letter_type_id} onValueChange={(v) => setFormData({...formData, letter_type_id: v})}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border"><SelectValue placeholder="Pilih Jenis" /></SelectTrigger>
                 <SelectContent>{master.types?.map((t: any) => <SelectItem key={t.id} value={t.id}>{t.code} - {t.name}</SelectItem>)}</SelectContent>
               </Select>

@@ -1,9 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, ShieldCheck, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
@@ -14,20 +13,50 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false); // State untuk Checkbox
   const navigate = useNavigate();
+
+  // Load email jika sebelumnya memilih 'Remember Me'
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('remembered_email');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      // 1. SET FLAG UNTUK CUSTOM STORAGE PROXY
+      // Nilai ini akan dibaca oleh logic di lib/supabase.ts
+      if (rememberMe) {
+        localStorage.setItem('sb-remember', 'true');
+        localStorage.setItem('remembered_email', email);
+      } else {
+        localStorage.removeItem('sb-remember');
+        localStorage.removeItem('remembered_email');
+      }
+
+      // 2. PROSES OTENTIKASI
+      const { data, error } = await supabase.auth.signInWithPassword({ 
+        email, 
+        password 
+      });
+
       if (error) throw error;
+
       if (data.session) {
         toast.success('Login Berhasil!');
         navigate('/dashboard');
       }
     } catch (error: any) {
       toast.error(error.message || 'Kredensial tidak valid');
+      
+      // Bersihkan flag jika login gagal agar tidak terjadi persistensi salah
+      localStorage.removeItem('sb-remember');
     } finally {
       setIsLoading(false);
     }
@@ -99,8 +128,17 @@ export default function LoginPage() {
             </div>
 
             <div className="flex items-center space-x-2 py-1">
-              <Checkbox id="remember" />
-              <Label htmlFor="remember" className="text-xs font-medium text-muted-foreground cursor-pointer">Ingat saya di perangkat ini</Label>
+              <Checkbox 
+                id="remember" 
+                checked={rememberMe} 
+                onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+              />
+              <Label 
+                htmlFor="remember" 
+                className="text-xs font-medium text-muted-foreground cursor-pointer"
+              >
+                Ingat saya di perangkat ini
+              </Label>
             </div>
 
             <Button disabled={isLoading} className="w-full h-12 rounded-xl text-base font-bold shadow-lg shadow-primary/20 group">
@@ -114,10 +152,8 @@ export default function LoginPage() {
         </motion.div>
       </div>
 
-      {/* SISI KANAN: ANIMASI BINTANG JATUH (Sangat Lambat) */}
+      {/* SISI KANAN: ANIMASI BINTANG JATUH */}
       <div className="hidden lg:flex flex-1 relative items-center justify-center overflow-hidden">
-        
-        {/* Stars Container */}
         <div className="absolute inset-0 z-0">
           {[...Array(60)].map((_, i) => (
             <div 
@@ -134,12 +170,10 @@ export default function LoginPage() {
           ))}
         </div>
 
-        {/* Shooting Stars dengan posisi acak */}
         <div className="shooting-star" style={{ top: '10%', right: '10%' }} />
         <div className="shooting-star delay-v-slow" style={{ top: '30%', right: '5%' }} />
         <div className="shooting-star delay-slow" style={{ top: '0%', right: '40%' }} />
 
-        {/* Branding Overlay */}
         <div className="relative z-10 text-center px-10">
           <motion.h2 
             initial={{ opacity: 0, y: 20 }}
@@ -159,7 +193,6 @@ export default function LoginPage() {
           </motion.p>
         </div>
 
-        {/* Ambient Glow */}
         <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-primary/20 rounded-full blur-[150px]" />
       </div>
 

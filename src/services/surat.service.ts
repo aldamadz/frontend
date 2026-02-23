@@ -650,32 +650,67 @@ async getMyInbox(userId: string) {
     return publicUrl;
   },
 
-async getAllSurat(userId?: string): Promise<SuratRegistrasi[]> {
+  async getSuratMonitoring(noSurat?: string) {
   let query = supabase
-    .from("surat_registrasi")
-    .select(`
-      *,
-      surat_signatures (
-        id,
-        user_id,
-        role_name,
-        step_order,
-        is_signed,
-        signed_at,
-        profiles:user_id (full_name)
-      )
-    `);
+    .from("view_monitoring_signatures") // Memanggil VIEW yang kita buat di SQL tadi
+    .select("*");
 
-  // Jika userId dikirim, filter hanya surat milik user tersebut
-  if (userId) {
-    query = query.eq('created_by', userId);
+  if (noSurat) {
+    query = query.eq('no_surat', noSurat);
   }
 
-  const { data, error } = await query.order("created_at", { ascending: false });
+  const { data, error } = await query.order("step_order", { ascending: true });
 
   if (error) throw error;
+  return data;
+},
 
-  return (data || []) as SuratRegistrasi[];
+async getAllSurat(userId?: string): Promise<SuratRegistrasi[]> {
+  try {
+    let query = supabase
+      .from("surat_registrasi")
+      .select(`
+        *,
+        surat_signatures (
+          id,
+          user_id,
+          role_name,
+          step_order,
+          is_signed,
+          signed_at,
+          profiles:user_id (
+            full_name
+          )
+        )
+      `)
+      // Mengurutkan surat berdasarkan tanggal terbaru
+      .order("created_at", { ascending: false });
+
+    // Jika userId dikirim, filter hanya surat milik user tersebut (sebagai pembuat)
+    if (userId) {
+      query = query.eq('created_by', userId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error fetching all surat:", error);
+      throw error;
+    }
+
+    // Perbaikan: Pastikan surat_signatures di dalam setiap surat juga terurut berdasarkan step_order
+    const formattedData = (data || []).map((surat: any) => ({
+      ...surat,
+      surat_signatures: surat.surat_signatures?.sort(
+        (a: any, b: any) => a.step_order - b.step_order
+      ) || []
+    }));
+
+    return formattedData as SuratRegistrasi[];
+  } catch (err) {
+    console.error("Detailed getAllSurat Error:", err);
+    throw err;
+  }
 },
 
 async getMasterData() {

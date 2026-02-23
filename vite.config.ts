@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => ({
   },
   // --- TAMBAHKAN OPTIMASI BUILD DI BAWAH INI ---
   build: {
-    chunkSizeWarningLimit: 800, // Menaikkan limit agar tidak muncul peringatan kuning
+    chunkSizeWarningLimit: 1600, // Menaikkan limit agar tidak muncul peringatan kuning
     rollupOptions: {
       output: {
         // Fungsi untuk memecah library pihak ketiga (node_modules)

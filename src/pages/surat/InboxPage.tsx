@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { 
   FileText, 
@@ -10,7 +10,9 @@ import {
   Eye,
   XCircle,
   MessageSquare,
-  Paperclip // Icon tambahan untuk lampiran
+  Paperclip,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { suratService } from "@/services/surat.service";
 import { supabase } from "@/lib/supabase";
@@ -26,11 +28,14 @@ export default function InboxPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
   
+  // PAGINATION STATE
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5; // Menampilkan 5 data per halaman
+
   // State untuk Preview & Notes
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState<{ [key: string]: string }>({});
   
-  // Ref untuk autofocus ke textarea jika catatan kosong saat reject
   const noteRefs = useRef<{ [key: string]: HTMLTextAreaElement | null }>({});
 
   // 1. DATA INBOX
@@ -59,10 +64,24 @@ export default function InboxPage() {
     }
   });
 
+  // FILTERING LOGIC
   const filteredInbox = inbox.filter((item: any) => 
     item.surat_registrasi.judul_surat.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.surat_registrasi.no_surat?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // PAGINATION LOGIC
+  const totalPages = Math.ceil(filteredInbox.length / itemsPerPage);
+  
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredInbox.slice(start, start + itemsPerPage);
+  }, [filteredInbox, currentPage]);
+
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setCurrentPage(1); // Reset ke halaman 1 saat mencari
+  };
 
   // FUNGSI APPROVE
   const handleApprove = async (item: any) => {
@@ -119,7 +138,6 @@ export default function InboxPage() {
     }
   };
 
-  // FUNGSI PREVIEW FILE UTAMA (EXCEL)
   const openPreview = (url: string) => {
     if (!url) return;
     const cleanUrl = url.split('?')[0]; 
@@ -127,7 +145,6 @@ export default function InboxPage() {
     setPreviewUrl(viewerUrl);
   };
 
-  // FUNGSI LIHAT LAMPIRAN (PDF/IMAGE/DLL)
   const openLampiran = (url: string) => {
     if (!url) return;
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -158,7 +175,7 @@ export default function InboxPage() {
           </div>
           <div className="flex items-center gap-2 ml-5">
             <Badge variant="outline" className="rounded-none border-primary/30 text-primary text-[9px] font-black px-2 py-0">
-              {inbox.length} QUEUE
+              {filteredInbox.length} QUEUE
             </Badge>
           </div>
         </div>
@@ -168,7 +185,7 @@ export default function InboxPage() {
           <Input 
             placeholder="FILTER QUEUE..." 
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-8 h-10 bg-transparent border-0 border-b border-border rounded-none focus-visible:ring-0 uppercase text-[11px] font-bold tracking-widest"
           />
         </div>
@@ -176,15 +193,16 @@ export default function InboxPage() {
 
       {/* LIST SECTION */}
       <div className="max-w-6xl mx-auto space-y-6">
-        {filteredInbox.length === 0 ? (
+        {paginatedData.length === 0 ? (
           <div className="h-64 flex flex-col items-center justify-center border border-dashed border-border rounded-3xl opacity-50">
             <ShieldCheck size={32} className="text-muted-foreground mb-4" />
-            <h2 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.5em]">Inbox is Empty</h2>
+            <h2 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.5em]">
+              {searchTerm ? "No Results Found" : "Inbox is Empty"}
+            </h2>
           </div>
         ) : (
-          filteredInbox.map((item: any) => (
+          paginatedData.map((item: any) => (
             <div key={item.id} className="group flex flex-col overflow-hidden transition-all bg-card border border-border rounded-xl shadow-sm hover:border-primary/40">
-              
               <div className="grid grid-cols-1 md:grid-cols-12">
                 {/* Sidebar Info */}
                 <div className="md:col-span-2 bg-muted/30 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-border">
@@ -212,7 +230,6 @@ export default function InboxPage() {
                     </div>
                   </div>
 
-                  {/* NOTE INPUT SECTION */}
                   <div className="relative group/note">
                     <MessageSquare size={14} className="absolute left-3 top-3 text-muted-foreground group-focus-within/note:text-primary transition-colors" />
                     <Textarea 
@@ -227,8 +244,6 @@ export default function InboxPage() {
 
                 {/* Actions Section */}
                 <div className="md:col-span-3 p-6 bg-muted/10 flex flex-col justify-center gap-2 border-t md:border-t-0 md:border-l border-border">
-                  
-                  {/* TOMBOL LAMPIRAN (BARU) */}
                   {item.surat_registrasi.lampiran_path && (
                     <Button 
                       variant="outline" 
@@ -280,7 +295,53 @@ export default function InboxPage() {
         )}
       </div>
 
-      {/* FOOTER */}
+      {/* PAGINATION CONTROLS */}
+      {totalPages > 1 && (
+        <div className="max-w-6xl mx-auto flex items-center justify-between py-6 border-t border-border">
+          <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+            Page {currentPage} of {totalPages}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(prev => prev - 1)}
+              className="h-9 w-9 p-0 rounded-xl"
+            >
+              <ChevronLeft size={16} />
+            </Button>
+            
+            <div className="flex items-center gap-1">
+              {[...Array(totalPages)].map((_, i) => (
+                <Button
+                  key={i + 1}
+                  variant={currentPage === i + 1 ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setCurrentPage(i + 1)}
+                  className={`h-9 w-9 p-0 text-[10px] font-bold rounded-xl ${
+                    currentPage === i + 1 ? "bg-primary text-white hover:bg-primary/90" : ""
+                  }`}
+                >
+                  {i + 1}
+                </Button>
+              ))}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(prev => prev + 1)}
+              className="h-9 w-9 p-0 rounded-xl"
+            >
+              <ChevronRight size={16} />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* PROTOCOL FOOTER */}
       <div className="max-w-6xl mx-auto flex items-start gap-4 p-8 border border-border rounded-3xl bg-muted/5">
         <AlertCircle className="w-5 h-5 text-primary mt-0.5 shrink-0" />
         <div className="space-y-1">

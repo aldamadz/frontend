@@ -7,33 +7,37 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppLayout } from '@/components/layout/AppLayout';
 import { supabase } from "@/lib/supabase";
 
-// IMPORT KOMPONEN SYNC
+// IMPORT KOMPONEN SYNC (Tetap statis karena global state)
 import { RealtimeSync } from "@/providers/RealtimeSync"; 
 
-// STATIC IMPORT
+// STATIC IMPORT (Hanya Login karena ini entry point pertama)
 import LoginPage from "@/pages/auth/LoginPage"; 
-import DepartmentManagementPage from "./pages/admin/DepartmentManagementPage";
-import EntityManagementPage from "./pages/admin/EntityManagementPage";
-import FormManagementPage from "./pages/admin/FormManagementPage";
-import LetterTypeManagementPage from "./pages/admin/LetterTypeManagementPage";
-import OfficeManagementPage from "./pages/admin/OfficeManagementPage";
-import WorkflowDetailManagementPage from "./pages/admin/WorkflowDetailManagementPage";
-import MasterProjectManagementPage from "./pages/admin/ProjectManagementPage";
 
-// LAZY IMPORT
+// LAZY IMPORT - GENERAL PAGES
 const DashboardPage = lazy(() => import("@/pages/dashboard/DashboardPage"));
 const AgendaPage = lazy(() => import("@/pages/agenda/AgendaPage"));
 const CalendarPage = lazy(() => import("@/pages/calendar/CalendarPage"));
 const ActivityLogsPage = lazy(() => import("@/pages/activity-logs/ActivityLogsPage"));
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"));
-const UserManagementPage = lazy(() => import("@/pages/admin/UserManagementPage"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
-// KOMPONEN SURAT
+// LAZY IMPORT - SURAT & MONITORING
 const SuratPage = lazy(() => import("@/pages/surat/SuratPage"));
 const InboxPage = lazy(() => import("@/pages/surat/InboxPage"));
 const MonitoringPage = lazy(() => import("@/pages/surat/MonitoringPage"));
 
+// LAZY IMPORT - ADMIN MANAGEMENT (Dipindah ke lazy untuk mengecilkan bundle size)
+const UserManagementPage = lazy(() => import("@/pages/admin/UserManagementPage"));
+const DepartmentManagementPage = lazy(() => import("./pages/admin/DepartmentManagementPage"));
+const EntityManagementPage = lazy(() => import("./pages/admin/EntityManagementPage"));
+const FormManagementPage = lazy(() => import("./pages/admin/FormManagementPage"));
+const LetterTypeManagementPage = lazy(() => import("./pages/admin/LetterTypeManagementPage"));
+const OfficeManagementPage = lazy(() => import("./pages/admin/OfficeManagementPage"));
+const WorkflowDetailManagementPage = lazy(() => import("./pages/admin/WorkflowDetailManagementPage"));
+const MasterProjectManagementPage = lazy(() => import("./pages/admin/ProjectManagementPage"));
+const AdminMonitoringPage = lazy(() => import("./pages/admin/AdminMonitoringPage"));
+
+// Konfigurasi Query Client
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -43,6 +47,7 @@ const queryClient = new QueryClient({
   },
 });
 
+// Komponen Loading state saat Lazy Page dimuat
 const PageLoader = () => (
   <div className="h-screen w-full flex items-center justify-center bg-background">
     <div className="flex flex-col items-center gap-4">
@@ -58,15 +63,17 @@ const App = () => {
   const location = useLocation();
 
   useEffect(() => {
+    // Cek sesi saat aplikasi pertama kali dimuat
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setInitializing(false);
     });
 
+    // Listen perubahan auth (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (_event === 'SIGNED_OUT') {
-        queryClient.clear();
+        queryClient.clear(); // Bersihkan cache data saat logout
       }
     });
 
@@ -80,13 +87,13 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        {/* Realtime Provider hanya aktif jika sudah login */}
         {isAuth && <RealtimeSync />}
         
         <Toaster />
         <Sonner position="top-right" closeButton />
 
         <Suspense fallback={<PageLoader />}>
-          {/* Hapus AnimatePresence dari sini, pindahkan ke AppLayout */}
           <Routes location={location}>
             {/* PUBLIC ROUTE */}
             <Route 
@@ -104,10 +111,12 @@ const App = () => {
               <Route path="/activity-logs" element={<ActivityLogsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               
+              {/* SURAT MODULE */}
               <Route path="/surat/registrasi" element={<SuratPage />} />
               <Route path="/surat/inbox" element={<InboxPage />} />
               <Route path="/surat/monitoring" element={<MonitoringPage />} />
               
+              {/* ADMIN MODULE (Lazy Loaded) */}
               <Route path="/admin/users" element={<UserManagementPage />} />
               <Route path="/admin/departments" element={<DepartmentManagementPage />} />
               <Route path="/admin/entities" element={<EntityManagementPage />} />
@@ -116,10 +125,10 @@ const App = () => {
               <Route path="/admin/offices" element={<OfficeManagementPage />} />
               <Route path="/admin/workflow-details" element={<WorkflowDetailManagementPage />} />
               <Route path="/admin/master-projects" element={<MasterProjectManagementPage />} />
-              
-
+              <Route path="/admin/monitoring" element={<AdminMonitoringPage />} />
             </Route>
 
+            {/* 404 ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

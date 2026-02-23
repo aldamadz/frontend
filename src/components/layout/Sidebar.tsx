@@ -23,6 +23,7 @@ import {
   Tag,
   MapPin,
   GitMerge,
+  Monitor,
   Briefcase
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -50,15 +51,34 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
   const [isSuratOpen, setIsSuratOpen] = useState(false)
   const [isMasterOpen, setIsMasterOpen] = useState(false)
 
-  // 1. Auto-open submenus berdasarkan URL aktif
+  // 1. IMPROVED: Auto-open submenus berdasarkan URL aktif
   useEffect(() => {
-    if (location.pathname.startsWith('/surat')) {
-      setIsSuratOpen(true)
+    // Jangan buka submenu jika sidebar sedang dalam posisi collapsed (agar tidak aneh secara visual)
+    if (collapsed) return;
+
+    const path = location.pathname;
+
+    // Logika Auto-open Layanan Surat
+    if (path.startsWith('/surat')) {
+      setIsSuratOpen(true);
     }
-    if (location.pathname.startsWith('/admin/departments') || location.pathname.startsWith('/admin/users')) {
-      setIsMasterOpen(true)
+
+    // Logika Auto-open Master Data Admin
+    const masterDataPaths = [
+      '/admin/users', 
+      '/admin/departments', 
+      '/admin/entities', 
+      '/admin/forms', 
+      '/admin/letter-types', 
+      '/admin/offices', 
+      '/admin/workflow-details', 
+      '/admin/master-projects'
+    ];
+    
+    if (masterDataPaths.some(p => path.startsWith(p))) {
+      setIsMasterOpen(true);
     }
-  }, [location.pathname])
+  }, [location.pathname, collapsed]);
 
   // 2. Load Data User
   useEffect(() => {
@@ -112,22 +132,36 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
-  const handleLogout = async () => {
-    if (isLoggingOut) return
-    setIsLoggingOut(true)
-    const toastId = toast.loading("Logging out...")
-    try {
-      await supabase.removeAllChannels()
-      await supabase.auth.signOut()
-      localStorage.removeItem("isLoggedIn")
-      queryClient.clear()
-      toast.success("Berhasil keluar", { id: toastId })
-      window.location.replace("/")
-    } catch (error: any) {
-      toast.error("Logout failed: " + error.message, { id: toastId })
-      setIsLoggingOut(false)
-    }
+const handleLogout = async () => {
+  if (isLoggingOut) return
+  setIsLoggingOut(true)
+  const toastId = toast.loading("Sedang keluar...")
+  
+  try {
+    // 1. Putuskan semua koneksi Realtime (Penting untuk aplikasi SIGAP)
+    await supabase.removeAllChannels()
+    
+    // 2. Sign out dari Supabase Auth
+    await supabase.auth.signOut()
+    
+    // 3. Bersihkan flags dan cache
+    localStorage.removeItem("isLoggedIn")
+    localStorage.removeItem("sb-remember") // TAMBAHKAN INI agar proxy storage kembali ke default
+    
+    // Membersihkan cache React Query agar data agenda/surat tidak tersisa di memori
+    queryClient.clear()
+    
+    toast.success("Berhasil keluar", { id: toastId })
+    
+    // 4. Hard Redirect ke Home/Login
+    // replace("/") lebih aman daripada navigate("/") untuk urusan logout
+    window.location.replace("/")
+    
+  } catch (error: any) {
+    toast.error("Logout failed: " + error.message, { id: toastId })
+    setIsLoggingOut(false)
   }
+}
 
   const renderNavLink = (path: string, label: string, Icon: any, isSubItem = false) => (
     <NavLink 
@@ -292,7 +326,9 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
                 )}
               </AnimatePresence>
             </div>
-
+            
+            {/* Navigasi Admin Baru */}
+            {renderNavLink('/admin/monitoring', 'All Status Monitoring', Monitor)}
             {renderNavLink('/activity-logs', 'Activity Logs', Activity)}
           </div>
         )}
