@@ -37,28 +37,6 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
   const [isDownloading, setIsDownloading] = useState(false);
   const [openMatrix, setOpenMatrix] = useState(false);
   const [lampiranFile, setLampiranFile] = useState<File | null>(null);
-  
-const resetForm = () => {
-  // Reset data form utama
-  setFormData({
-    entity_id: "",
-    dept_id: "",
-    letter_type_id: "",
-    office_id: "pusat",
-    project_id: "",
-    judul_surat: "",
-    penggunaan_id: "",
-    is_aset: false
-  });
-
-  // Reset state pendukung
-  setGeneratedNoSurat(null);
-  setFile(null);
-  setLampiranFile(null);
-  setSelectedUsage(null);
-  setSigners([]);
-  setJudulForDisplay(""); // Jika perlu mengosongkan tampilan judul di parent
-};
 
   const [formData, setFormData] = useState({
     entity_id: "",
@@ -73,7 +51,19 @@ const resetForm = () => {
 
   const [signers, setSigners] = useState<any[]>([]);
 
-  // 1. Load Master Data
+  const resetForm = () => {
+    setFormData({
+      entity_id: "", dept_id: "", letter_type_id: "", office_id: "pusat",
+      project_id: "", judul_surat: "", penggunaan_id: "", is_aset: false
+    });
+    setGeneratedNoSurat(null);
+    setFile(null);
+    setLampiranFile(null);
+    setSelectedUsage(null);
+    setSigners([]);
+    setJudulForDisplay("");
+  };
+
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -86,23 +76,13 @@ const resetForm = () => {
     fetchInitialData();
   }, []);
 
-  // 2. Load Penggunaan Detail dengan Relasi Eksplisit
   useEffect(() => {
     const fetchUsageGlobal = async () => {
-      // Menggunakan !fk_master_forms untuk memastikan Supabase menggunakan join yang benar
       const { data, error } = await supabase
         .from('master_penggunaan_detail')
-        .select(`
-          *,
-          master_forms!fk_master_forms (
-            id,
-            department_id,
-            link_form
-          )
-        `);
+        .select(`*, master_forms!fk_master_forms (id, department_id, link_form)`);
 
       if (error) {
-        console.error("Error fetching usage details:", error);
         toast({ variant: "destructive", title: "Gagal memuat matrix", description: error.message });
       } else {
         setUsageDetails(data || []);
@@ -111,48 +91,26 @@ const resetForm = () => {
     fetchUsageGlobal();
   }, []);
 
-// Tambahkan fungsi ini
   const handleCopy = async () => {
     if (generatedNoSurat) {
-      try {
-        await navigator.clipboard.writeText(generatedNoSurat);
-        setIsCopied(true);
-        toast({ 
-          title: "Berhasil!", 
-          description: "Nomor surat telah disalin ke clipboard." 
-        });
-        setTimeout(() => setIsCopied(false), 2000);
-      } catch (err) {
-        toast({ 
-          variant: "destructive", 
-          title: "Gagal menyalin", 
-          description: "Silakan salin secara manual." 
-        });
-      }
+      await navigator.clipboard.writeText(generatedNoSurat);
+      setIsCopied(true);
+      toast({ title: "Berhasil!", description: "Nomor surat disalin." });
+      setTimeout(() => setIsCopied(false), 2000);
     }
   };
 
-  // Filter Departemen (Pusat vs Cabang)
   const filteredDepts = useMemo(() => {
     const isCabangOffice = formData.office_id !== "pusat";
-    return master.depts.filter((d: any) => {
-      return isCabangOffice ? d.name.includes("(Cabang)") : !d.name.includes("(Cabang)");
-    });
+    return master.depts.filter((d: any) => 
+      isCabangOffice ? d.name.includes("(Cabang)") : !d.name.includes("(Cabang)")
+    );
   }, [master.depts, formData.office_id]);
 
-  // Filter Proyek berdasarkan Kantor Cabang
   const filteredProjects = useMemo(() => {
     if (formData.office_id === "pusat") return [];
     return master.projects.filter((p: any) => p.office_id === formData.office_id);
   }, [master.projects, formData.office_id]);
-
-  const handleClearUsage = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFormData(prev => ({ ...prev, penggunaan_id: "" }));
-    setSelectedUsage(null);
-    setSigners([]);
-    setLampiranFile(null);
-  };
 
   const handleUsageChange = (val: string) => {
     const detail = usageDetails.find(u => u.id === val);
@@ -160,18 +118,29 @@ const resetForm = () => {
       setSelectedUsage(detail);
       setFormData(prev => ({ ...prev, penggunaan_id: val }));
       
-      const roles = [
-        ...(detail.membuat ? [detail.membuat] : []),
-        ...(detail.memeriksa ? detail.memeriksa.split(', ') : []),
-        ...(detail.menyetujui ? detail.menyetujui.split(', ') : [])
+      // LOGIKA REVISI: Pecah string berdasarkan koma untuk mendukung > 1 orang
+      const parseRoles = (str: string) => str ? str.split(',').map(s => s.trim()).filter(s => s !== "") : [];
+      
+      const combinedRoles = [
+        ...parseRoles(detail.membuat),
+        ...parseRoles(detail.memeriksa),
+        ...parseRoles(detail.menyetujui)
       ];
       
-      setSigners(roles.map((r, i) => ({ 
-        role_name: r.replace('- ', '').trim(), 
+      setSigners(combinedRoles.map((role, i) => ({ 
+        role_name: role, 
         user_id: "", 
         step_order: i + 1 
       })));
     }
+  };
+
+  const handleClearUsage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFormData(prev => ({ ...prev, penggunaan_id: "" }));
+    setSelectedUsage(null);
+    setSigners([]);
+    setLampiranFile(null);
   };
 
   const handleBookingNumber = async () => {
@@ -182,45 +151,23 @@ const resetForm = () => {
     try {
       const data = await suratService.generateNoSurat(formData);
       setGeneratedNoSurat(data);
-      toast({ title: "Booking Berhasil", description: `Nomor: ${data}` });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Booking Gagal", description: e.message });
-    } finally {
-      setIsBooking(false);
-    }
-  };
-
-  const handleUbahData = async () => {
-    // Logika pembatalan reservasi jika perlu bisa ditaruh di sini
-    setGeneratedNoSurat(null);
-    setFile(null);
-    setSelectedUsage(null);
-    setSigners([]);
-    setLampiranFile(null);
-  };
-
-  const handleDownloadTemplate = async () => {
-    if (!selectedUsage?.master_forms?.link_form || !generatedNoSurat) {
-      return toast({ variant: "destructive", title: "Error", description: "Template tidak tersedia." });
-    }
-    setIsDownloading(true);
-    try {
-      await suratService.downloadFilledTemplate(
-        { ...formData, no_surat: generatedNoSurat }, 
-        selectedUsage.master_forms.link_form
-      );
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Gagal", description: "Template gagal diunduh." });
-    } finally {
-      setIsDownloading(false);
-    }
+    } finally { setIsBooking(false); }
   };
 
   const handleSubmit = async () => {
     if (!file) return toast({ variant: "destructive", title: "File Utama Wajib" });
+    
+    // Validasi Lampiran Wajib berdasarkan database
     if (selectedUsage?.lampiran_wajib && !lampiranFile) {
-        return toast({ variant: "destructive", title: "Lampiran Wajib Kurang" });
+        return toast({ 
+          variant: "destructive", 
+          title: "Lampiran Wajib", 
+          description: `Anda wajib melampirkan file ${selectedUsage.lampiran_wajib}` 
+        });
     }
+
     if (signers.some(s => !s.user_id)) return toast({ variant: "destructive", title: "Pejabat Belum Lengkap" });
 
     setIsLoading(true);
@@ -237,9 +184,7 @@ const resetForm = () => {
       }
     } catch (error: any) {
       toast({ variant: "destructive", title: "Gagal Simpan", description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
+    } finally { setIsLoading(false); }
   };
 
   return (
@@ -270,11 +215,7 @@ const resetForm = () => {
 
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase tracking-tighter ml-1">Lokasi Penerbitan</Label>
-              <Select 
-                disabled={!!generatedNoSurat} 
-                value={formData.office_id} 
-                onValueChange={(v) => setFormData({...formData, office_id: v, project_id: "", dept_id: ""})}
-              >
+              <Select disabled={!!generatedNoSurat} value={formData.office_id} onValueChange={(v) => setFormData({...formData, office_id: v, project_id: "", dept_id: ""})}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pusat">Kantor Pusat</SelectItem>
@@ -285,20 +226,10 @@ const resetForm = () => {
 
             {formData.office_id !== "pusat" && (
               <div className="space-y-2 animate-in slide-in-from-top-2">
-                <Label className="text-[11px] font-black uppercase text-primary ml-1 flex items-center gap-2">
-                  <Briefcase className="w-3 h-3" /> Wajib Pilih Proyek
-                </Label>
-                <Select 
-                  disabled={!!generatedNoSurat} 
-                  value={formData.project_id}
-                  onValueChange={(v) => setFormData({...formData, project_id: v})}
-                >
-                  <SelectTrigger className="h-11 border-primary/40 bg-primary/5">
-                    <SelectValue placeholder="Pilih proyek..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredProjects.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>)}
-                  </SelectContent>
+                <Label className="text-[11px] font-black uppercase text-primary ml-1 flex items-center gap-2"><Briefcase className="w-3 h-3" /> Wajib Pilih Proyek</Label>
+                <Select disabled={!!generatedNoSurat} value={formData.project_id} onValueChange={(v) => setFormData({...formData, project_id: v})}>
+                  <SelectTrigger className="h-11 border-primary/40 bg-primary/5"><SelectValue placeholder="Pilih proyek..." /></SelectTrigger>
+                  <SelectContent>{filteredProjects.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
@@ -319,21 +250,15 @@ const resetForm = () => {
               </Select>
             </div>
           </div>
-<div className="flex items-center justify-between p-4 rounded-2xl bg-primary/5 border border-primary/10 mb-4">
-  <div className="space-y-0.5">
-    <Label className="text-sm font-black uppercase tracking-tight flex items-center gap-2">
-      <Landmark className="w-4 h-4 text-primary" /> Dokumen Terkait Aset?
-    </Label>
-    <p className="text-[10px] text-muted-foreground font-medium">
-      Aktifkan jika dokumen ini berhubungan dengan inventaris/aset perusahaan.
-    </p>
-  </div>
-  <Switch 
-    disabled={!!generatedNoSurat}
-    checked={formData.is_aset}
-    onCheckedChange={(val) => setFormData({...formData, is_aset: val})}
-  />
-</div>
+
+          <div className="flex items-center justify-between p-4 rounded-2xl bg-primary/5 border border-primary/10">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-black uppercase tracking-tight flex items-center gap-2"><Landmark className="w-4 h-4 text-primary" /> Dokumen Terkait Aset?</Label>
+              <p className="text-[10px] text-muted-foreground font-medium">Aktifkan jika berhubungan dengan inventaris perusahaan.</p>
+            </div>
+            <Switch disabled={!!generatedNoSurat} checked={formData.is_aset} onCheckedChange={(val) => setFormData({...formData, is_aset: val})} />
+          </div>
+
           {!generatedNoSurat ? (
             <Button 
               onClick={handleBookingNumber} 
@@ -350,13 +275,11 @@ const resetForm = () => {
                   <p className="text-[10px] font-black text-primary uppercase tracking-widest">Booking Registered</p>
                   <div className="flex items-center gap-3">
                     <p className="text-3xl font-black tracking-tighter">{generatedNoSurat}</p>
-                    <Button variant="outline" size="icon" onClick={handleCopy} className="h-8 w-8">
-                      {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </Button>
+                    <Button variant="outline" size="icon" onClick={handleCopy} className="h-8 w-8">{isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}</Button>
                   </div>
                 </div>
               </div>
-              <Button variant="ghost" onClick={handleUbahData} className="text-primary font-bold">Ubah Data</Button>
+              <Button variant="ghost" onClick={() => setGeneratedNoSurat(null)} className="text-primary font-bold">Ubah Data</Button>
             </div>
           )}
         </section>
@@ -394,7 +317,7 @@ const resetForm = () => {
                                 <Check className={cn("mr-2 h-4 w-4", formData.penggunaan_id === u.id ? "opacity-100" : "opacity-0")} />
                                 <div className="flex flex-col">
                                     <span className="font-bold">{u.penggunaan}</span>
-                                    <span className="text-[10px] opacity-60">{u.membuat} → {u.menyetujui}</span>
+                                    <span className="text-[9px] opacity-60 uppercase tracking-tighter">{u.membuat} → {u.menyetujui}</span>
                                 </div>
                               </CommandItem>
                             ))}
@@ -407,22 +330,14 @@ const resetForm = () => {
 
                 <div className="space-y-2">
                   <Label className="text-[11px] font-black uppercase ml-1">Perihal Dokumen</Label>
-                  <Input 
-                    className="h-12 bg-muted/50 border-none ring-1 ring-border rounded-xl" 
-                    placeholder="Contoh: Permohonan Pembayaran..." 
-                    value={formData.judul_surat}
-                    onChange={(e) => { setFormData({...formData, judul_surat: e.target.value}); setJudulForDisplay(e.target.value); }} 
-                  />
+                  <Input className="h-12 bg-muted/50 border-none ring-1 ring-border rounded-xl" placeholder="Masukkan judul surat..." value={formData.judul_surat} onChange={(e) => { setFormData({...formData, judul_surat: e.target.value}); setJudulForDisplay(e.target.value); }} />
                 </div>
 
                 {selectedUsage?.master_forms?.link_form && (
                   <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-3">
-                    <p className="text-[10px] font-bold text-amber-600 flex items-center gap-2 uppercase tracking-tighter">
-                      <AlertCircle className="w-3 h-3" /> 1. Download & Isi Template
-                    </p>
-                    <Button variant="outline" className="w-full border-amber-500/30 text-amber-700 font-bold" disabled={isDownloading} onClick={handleDownloadTemplate}>
-                      {isDownloading ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <Download className="w-4 h-4 mr-2" />}
-                      Download Excel Template
+                    <p className="text-[10px] font-bold text-amber-600 flex items-center gap-2 uppercase tracking-tighter"><AlertCircle className="w-3 h-3" /> 1. Download & Isi Template</p>
+                    <Button variant="outline" className="w-full border-amber-500/30 text-amber-700 font-bold" disabled={isDownloading} onClick={() => suratService.downloadFilledTemplate({ ...formData, no_surat: generatedNoSurat }, selectedUsage.master_forms.link_form)}>
+                      {isDownloading ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <Download className="w-4 h-4 mr-2" />} Download Excel Template
                     </Button>
                   </div>
                 )}
@@ -431,21 +346,20 @@ const resetForm = () => {
               <div className="space-y-4">
                 <div className={cn("relative group border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center transition-all", file ? "border-primary bg-primary/[0.02]" : "border-muted-foreground/20 bg-muted/20")}>
                   <input type="file" accept=".xlsx" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-                  <div className={cn("p-4 rounded-2xl mb-3", file ? "bg-primary text-white" : "bg-background text-muted-foreground")}>
-                    <FileUp className="w-6 h-6" />
-                  </div>
+                  <div className={cn("p-4 rounded-2xl mb-3", file ? "bg-primary text-white" : "bg-background text-muted-foreground")}><FileUp className="w-6 h-6" /></div>
                   <p className="font-bold text-center text-xs truncate max-w-full">{file ? file.name : "2. Unggah file Excel utama"}</p>
                 </div>
 
+                {/* LOGIKA REVISI: Tampilkan Lampiran Wajib sesuai Table */}
                 {selectedUsage?.lampiran_wajib && (
-                  <div className={cn("relative border-2 border-dashed rounded-2xl p-6 flex items-center gap-4 transition-all", lampiranFile ? "border-amber-500 bg-amber-500/5" : "border-amber-500/20 bg-amber-500/[0.02]")}>
+                  <div className={cn("relative border-2 border-dashed rounded-2xl p-6 flex items-center gap-4 transition-all animate-in fade-in zoom-in-95", lampiranFile ? "border-amber-500 bg-amber-500/5" : "border-destructive/40 bg-destructive/5")}>
                     <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => setLampiranFile(e.target.files?.[0] || null)} />
-                    <div className={cn("p-3 rounded-xl", lampiranFile ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-600")}><Paperclip className="w-5 h-5" /></div>
+                    <div className={cn("p-3 rounded-xl shadow-sm", lampiranFile ? "bg-amber-500 text-white" : "bg-destructive text-white")}><Paperclip className="w-5 h-5" /></div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-black text-amber-600 uppercase">Wajib: {selectedUsage.lampiran_wajib}</p>
-                      <p className="text-xs font-bold truncate">{lampiranFile ? lampiranFile.name : "Klik untuk upload"}</p>
+                      <p className={cn("text-[11px] font-black uppercase tracking-widest mb-1", lampiranFile ? "text-amber-600" : "text-destructive")}>Wajib: {selectedUsage.lampiran_wajib}</p>
+                      <p className="text-xs font-bold truncate text-muted-foreground">{lampiranFile ? lampiranFile.name : "Klik untuk upload lampiran pendukung"}</p>
                     </div>
-                    {lampiranFile && <Check className="w-4 h-4 text-amber-500" />}
+                    {lampiranFile && <div className="p-1 bg-amber-500 rounded-full text-white"><Check className="w-3 h-3" /></div>}
                   </div>
                 )}
               </div>
@@ -469,15 +383,13 @@ const resetForm = () => {
                       <span className="text-[8px] opacity-60">STEP</span>{s.step_order}
                     </div>
                     <div className="flex-1 space-y-3">
-                      <span className="text-xs font-black uppercase">{s.role_name}</span>
+                      <span className="text-xs font-black uppercase text-primary">{s.role_name}</span>
                       <Select onValueChange={(val) => {
                         const newS = [...signers];
                         newS[i].user_id = val;
                         setSigners(newS);
                       }}>
-                        <SelectTrigger className="bg-muted/30 h-11 border-none ring-1 ring-border rounded-xl">
-                          <SelectValue placeholder="Pilih Pejabat..." />
-                        </SelectTrigger>
+                        <SelectTrigger className="bg-muted/30 h-11 border-none ring-1 ring-border rounded-xl"><SelectValue placeholder="Pilih Pejabat..." /></SelectTrigger>
                         <SelectContent>{master.users?.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
@@ -489,12 +401,15 @@ const resetForm = () => {
 
             <div className="pt-6 border-t border-border/50">
               <Button 
-                className="w-full h-16 bg-primary text-lg font-black rounded-3xl shadow-2xl transition-all"
+                className="w-full h-16 bg-primary text-lg font-black rounded-3xl shadow-2xl transition-all hover:scale-[1.01]"
                 disabled={isLoading || signers.some(s => !s.user_id) || !formData.judul_surat || (!!selectedUsage?.lampiran_wajib && !lampiranFile)}
                 onClick={handleSubmit}
               >
                 {isLoading ? <Loader2 className="animate-spin w-6 h-6 mr-3" /> : "KONFIRMASI & KIRIM DOKUMEN"}
               </Button>
+              {!!selectedUsage?.lampiran_wajib && !lampiranFile && (
+                <p className="text-center text-destructive text-[10px] font-bold uppercase tracking-widest mt-4">Peringatan: Lampiran {selectedUsage.lampiran_wajib} Belum Diupload</p>
+              )}
             </div>
           </section>
         )}

@@ -8,15 +8,18 @@ export interface ChildUser {
   avatar_url: string | null;
   department_id: number | null;
   office_id: number | null;
-  parent_id: string | null; // Ditambahkan untuk membantu indentasi di UI
+  parent_id: string | null;
+  displayName?: string; // Untuk label di dropdown
+  depth?: number;        // Tingkat kedalaman hirarki
 }
 
 /**
  * MENGAMBIL SELURUH HIERARKI USER (Anak, Cucu, Cicit)
- * Fungsi ini digunakan untuk mengisi dropdown filter di UI
+ * Fungsi ini digunakan untuk mengisi dropdown filter di UI sehingga
+ * Admin bisa memilih Yatno (Cucu) secara perorangan.
  */
 export async function getChildUsers(parentId: string): Promise<ChildUser[]> {
-  // 1. Ambil SEMUA profil aktif sekali saja (untuk efisiensi)
+  // 1. Ambil SEMUA profil aktif sekali saja untuk diproses di memori
   const { data, error } = await supabase
     .from('profiles')
     .select(`
@@ -34,21 +37,28 @@ export async function getChildUsers(parentId: string): Promise<ChildUser[]> {
   if (error) throw error;
   if (!data) return [];
 
-  const result: any[] = [];
+  const result: ChildUser[] = [];
 
-  // 2. Fungsi Rekursif untuk membangun flat list yang terurut secara hirarki
+  /**
+   * 2. Fungsi Rekursif untuk membangun daftar flat
+   * Ini akan menelusuri secara mendalam: Admin -> Siti -> Yatno
+   */
   const findDeep = (currentParentId: string, level: number = 0) => {
+    // Cari semua user yang atasan langsungnya adalah currentParentId
     const children = data.filter(p => p.parent_id === currentParentId);
     
     children.forEach(child => {
-      // Kita tambahkan properti 'label' dengan spasi untuk indentasi di UI
+      // Menggunakan \u00A0 (Non-Breaking Space) agar indentasi muncul di dropdown HTML
+      const indentation = "\u00A0\u00A0".repeat(level);
+      const prefix = level > 0 ? "↳ " : "";
+      
       result.push({
         ...child,
-        displayName: `${"  ".repeat(level)}${level > 0 ? "↳ " : ""}${child.full_name}`,
+        displayName: `${indentation}${prefix}${child.full_name}`,
         depth: level
-      });
+      } as ChildUser);
       
-      // Telusuri lebih dalam (Cucu, Cicit, dst)
+      // REKURSI: Cari lagi bawahan dari user ini (Mencari cucu)
       findDeep(child.id, level + 1);
     });
   };
@@ -58,7 +68,7 @@ export async function getChildUsers(parentId: string): Promise<ChildUser[]> {
 }
 
 /**
- * Mengecek apakah user memiliki bawahan sama sekali
+ * Mengecek apakah user memiliki bawahan (Parent Status)
  */
 export async function isParentUser(userId: string): Promise<boolean> {
   const { count, error } = await supabase
@@ -76,7 +86,8 @@ export async function isParentUser(userId: string): Promise<boolean> {
 }
 
 /**
- * Mengambil hanya daftar ID (String Array) untuk keperluan query SQL .in()
+ * Mengambil daftar ID lengkap secara rekursif
+ * Digunakan untuk query .in() jika atasan ingin melihat "Semua Bawahan" sekaligus
  */
 export async function getUserHierarchy(parentId: string): Promise<string[]> {
   const { data: allProfiles, error } = await supabase
@@ -93,6 +104,7 @@ export async function getUserHierarchy(parentId: string): Promise<string[]> {
     children.forEach(child => {
       if (!allSubordinateIds.includes(child.id)) {
         allSubordinateIds.push(child.id);
+        // Terus telusuri sampai level terbawah
         findChildrenRecursive(child.id);
       }
     });

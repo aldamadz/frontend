@@ -10,7 +10,7 @@ import { AgendaParentFilter } from '@/components/agenda/AgendaParentFilter'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
-// Gabungkan semua import service agar tidak bentrok
+// Import service
 import { 
   getAgendas, 
   getUsers, 
@@ -33,7 +33,8 @@ export default function AgendaPage() {
   const [selectedAgenda, setSelectedAgenda] = useState<Agenda | null>(null)
   
   const [isParent, setIsParent] = useState(false)
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  // Inisialisasi dengan 'all' agar sinkron dengan komponen AgendaParentFilter
+  const [selectedUserId, setSelectedUserId] = useState<string | null>('all')
   const [selectedOfficeId, setSelectedOfficeId] = useState<string | null>(null)
   const [isCheckingParent, setIsCheckingParent] = useState(true)
 
@@ -51,9 +52,12 @@ export default function AgendaPage() {
         const parentStatus = await isParentUser(user.id)
         setIsParent(parentStatus)
         
-        // Sync default filter
-        if (parentStatus && !selectedUserId) {
-          setSelectedUserId(null) // Menampilkan semua bawahan secara default
+        // Jika bukan parent, set filter ke ID sendiri
+        if (!parentStatus) {
+          setSelectedUserId(user.id)
+        } else {
+          // Jika parent, default adalah 'all' (Seluruh Tim)
+          setSelectedUserId('all')
         }
       } catch (error) {
         console.error('Error checking parent status:', error)
@@ -67,27 +71,32 @@ export default function AgendaPage() {
   }, [user?.id])
 
   /* ======================================================
-      2. DATA FETCHING (FIXED ARGUMENTS)
+      2. DATA FETCHING (DIPERBAIKI)
   ====================================================== */
   
-const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
-  queryKey: ['agendas', user?.id, selectedUserId, selectedOfficeId, isParent],
-  queryFn: async () => {
-    if (!user?.id) return [];
-    
-    if (isParent) {
-      // Pastikan urutannya: 1. ID Login, 2. ID Filter User, 3. ID Filter Kantor
-      return await getAgendasForParent(
-        user.id, 
-        selectedUserId, 
-        selectedOfficeId
-      );
-    }
-    
-    return await getAgendas();
-  },
-  enabled: !!user?.id && !isCheckingParent
-});
+  const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
+    // QueryKey harus mencakup semua variabel filter agar auto-refetch saat filter berubah
+    queryKey: ['agendas', user?.id, selectedUserId, selectedOfficeId, isParent],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      
+      // Jika user adalah atasan, gunakan service parent
+      if (isParent) {
+        return await getAgendasForParent(
+          user.id, 
+          selectedUserId, // Ini bisa 'all', ID pribadi, atau ID Yatno
+          selectedOfficeId
+        );
+      }
+      
+      // Jika user biasa, ambil agenda personal saja
+      return await getAgendas();
+    },
+    // Jangan running query sebelum status parent diketahui
+    enabled: !!user?.id && !isCheckingParent,
+    // Tambahkan staleTime agar tidak terlalu sering fetching jika data tidak berubah
+    staleTime: 1000 * 60 * 5, 
+  });
 
   const { data: users = [], isLoading: isLoadingUsers } = useQuery({
     queryKey: ['users'],
@@ -111,7 +120,6 @@ const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agendas'] })
-      queryClient.invalidateQueries({ queryKey: ['activity-logs'] })
       toast.success(selectedAgenda ? 'Agenda diperbarui' : 'Agenda baru dibuat')
       closeAllModals()
     },
@@ -158,7 +166,8 @@ const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
   }, [statusMutation])
 
   const handleUserSelect = useCallback((userId: string | null) => {
-    setSelectedUserId(userId)
+    // Jika userId null dari komponen filter, arahkan ke 'all'
+    setSelectedUserId(userId || 'all')
   }, [])
 
   const handleOfficeSelect = useCallback((officeId: string | null) => {
@@ -168,8 +177,9 @@ const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
   const getSubtitle = () => {
     if (!isParent) return 'Kelola jadwal pribadi Anda secara efisien.'
     if (selectedUserId === user?.id) return 'Menampilkan agenda pribadi Anda.'
-    if (!selectedUserId) return 'Menampilkan seluruh agenda tim berdasarkan hirarki.'
+    if (selectedUserId === 'all' || !selectedUserId) return 'Menampilkan seluruh agenda tim berdasarkan hirarki.'
     
+    // Cari nama user yang difilter (Yatno)
     const targetMember = users.find(u => String(u.id) === String(selectedUserId))
     return `Menampilkan agenda untuk: ${targetMember?.fullName || 'Anggota Tim'}`
   }
@@ -181,7 +191,10 @@ const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
   if (isLoadingAgendas || isLoadingUsers || isCheckingParent) {
     return (
       <div className="p-8 space-y-8 max-w-7xl mx-auto">
-        <Skeleton className="h-12 w-64" />
+        <div className="flex justify-between items-center">
+          <Skeleton className="h-12 w-64" />
+          <Skeleton className="h-12 w-40 rounded-full" />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-48 rounded-2xl" />
@@ -204,14 +217,14 @@ const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
             setIsModalOpen(true)
           }} 
           size="lg"
-          className="rounded-full px-8 shadow-xl"
+          className="rounded-full px-8 shadow-xl bg-primary hover:scale-105 transition-transform"
         >
           <span className="mr-2 text-xl">+</span> Agenda Baru
         </Button>
       </div>
 
       {isParent && (
-        <div className="mb-6 bg-card/50 backdrop-blur-sm rounded-2xl border p-6 shadow-sm">
+        <div className="mb-6 bg-card/50 backdrop-blur-sm rounded-2xl border p-6 shadow-sm border-primary/10">
           <AgendaParentFilter
             onUserSelect={handleUserSelect}
             selectedUserId={selectedUserId}
@@ -221,13 +234,19 @@ const { data: agendas = [], isLoading: isLoadingAgendas } = useQuery({
         </div>
       )}
 
-      <div className="bg-background/50 backdrop-blur-sm rounded-3xl border p-1">
-        <AgendaTabs
-          agendas={agendas}
-          users={users}
-          onAgendaClick={handleAgendaClick}
-          onStatusChange={handleStatusChange}
-        />
+      <div className="bg-background/50 backdrop-blur-sm rounded-3xl border p-1 shadow-inner">
+        {agendas.length === 0 ? (
+          <div className="py-20 text-center">
+             <p className="text-muted-foreground">Tidak ada agenda ditemukan untuk filter ini.</p>
+          </div>
+        ) : (
+          <AgendaTabs
+            agendas={agendas}
+            users={users}
+            onAgendaClick={handleAgendaClick}
+            onStatusChange={handleStatusChange}
+          />
+        )}
       </div>
 
       <AgendaDetailModal 

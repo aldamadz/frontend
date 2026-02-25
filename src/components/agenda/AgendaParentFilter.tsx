@@ -1,3 +1,4 @@
+// src/components/agenda/agenda-parent-filter.tsx
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -13,7 +14,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/use-auth';
-import { getChildUsers } from '@/services/parent-user.service'; 
+import { getChildUsers, ChildUser } from '@/services/parent-user.service'; 
 import { Users, Loader2, Building2, UserCircle, ChevronRight } from 'lucide-react';
 
 interface AgendaParentFilterProps {
@@ -31,46 +32,37 @@ export function AgendaParentFilter({
 }: AgendaParentFilterProps) {
   const { user } = useAuth() as any;
 
-  // 1. Ambil daftar kantor untuk dropdown Area
   const { data: offices = [] } = useQuery({
     queryKey: ['offices-list'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('offices')
-        .select('id, name')
-        .order('name');
+      const { data, error } = await supabase.from('offices').select('id, name').order('name');
       if (error) throw error;
       return data;
     }
   });
 
-  // 2. Ambil user secara REKURSIF berdasarkan hirarki atasan
   const { data: childUsers = [], isLoading: isLoadingUsers } = useQuery({
     queryKey: ['visible-users-recursive', user?.id],
     queryFn: () => getChildUsers(user?.id),
     enabled: !!user?.id,
   });
 
-  // 3. Logika Grouping User berdasarkan Kantor
-  const filteredAndGrouped = useMemo(() => {
-    const filtered = selectedOfficeId 
-      ? childUsers.filter((u: any) => String(u.office_id) === String(selectedOfficeId))
-      : childUsers;
-
-    return filtered.reduce((acc: Record<string, any[]>, curr: any) => {
-      const officeName = curr.offices?.name || 'KANTOR CABANG';
+  // PERBAIKAN: Grouping tetap menampilkan semua bawahan tanpa terpotong filter kantor di dalam dropdown
+  const groupedByOffice = useMemo(() => {
+    return childUsers.reduce((acc: Record<string, ChildUser[]>, curr: ChildUser) => {
+      const officeInfo = offices.find(o => String(o.id) === String(curr.office_id));
+      const officeName = officeInfo?.name || 'KANTOR CABANG';
       if (!acc[officeName]) acc[officeName] = [];
       acc[officeName].push(curr);
       return acc;
     }, {});
-  }, [childUsers, selectedOfficeId]);
+  }, [childUsers, offices]);
 
   const getInitials = (name: string) => {
     if (!name) return '??';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
-  // Helper untuk tampilan label saat ini
   const selectedChild = childUsers.find((u: any) => String(u.id) === String(selectedUserId));
   const isMeSelected = String(selectedUserId) === String(user?.id);
 
@@ -92,12 +84,11 @@ export function AgendaParentFilter({
           value={selectedOfficeId || "all_offices"} 
           onValueChange={(val) => {
             onOfficeSelect(val === 'all_offices' ? null : val);
-            // Reset ke 'all' saat ganti kantor agar data tidak 'ngawur' 
-            // menunjuk user dari kantor sebelumnya
+            // PENTING: Jika pindah kantor, kembalikan ke "Semua Tim" agar tidak stuck di user kantor lama
             onUserSelect('all'); 
           }}
         >
-          <SelectTrigger className="h-9 bg-background border-border/60 rounded-xl text-[11px] font-bold shadow-sm transition-all hover:border-primary/30">
+          <SelectTrigger className="h-9 bg-background border-border/60 rounded-xl text-[11px] font-bold shadow-sm">
             <SelectValue>{currentOfficeLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent className="rounded-xl shadow-xl">
@@ -120,97 +111,52 @@ export function AgendaParentFilter({
         </Label>
         <Select
           value={selectedUserId || 'all'}
-          onValueChange={(value) => onUserSelect(value)}
+          onValueChange={(value) => {
+            onUserSelect(value);
+            // PENTING: Jika memilih user perorangan, matikan filter kantor (set ke null)
+            // Agar query di backend tidak memfilter kantor secara ganda
+            if (value !== 'all' && value !== user?.id) {
+               onOfficeSelect(null);
+            }
+          }}
           disabled={isLoadingUsers}
         >
-          <SelectTrigger className="h-9 bg-background border-border/60 rounded-xl text-[11px] shadow-sm transition-all hover:border-primary/30">
+          <SelectTrigger className="h-9 bg-background border-border/60 rounded-xl text-[11px] shadow-sm">
             <SelectValue>
               {isMeSelected ? (
-                <div className="flex items-center gap-2">
-                  <UserCircle className="h-3.5 w-3.5 text-primary" />
-                  <span className="font-bold">Agenda Saya (Pribadi)</span>
-                </div>
+                <span className="font-bold">Agenda Saya</span>
               ) : (selectedUserId === 'all' || !selectedUserId) ? (
-                <div className="flex items-center gap-2">
-                  <Users className="h-3.5 w-3.5 text-primary" />
-                  <span className="font-bold">Seluruh Anggota Tim</span>
-                </div>
+                <span className="font-bold">Seluruh Anggota Tim</span>
               ) : (
-                <div className="flex items-center gap-2">
-                  <Avatar className="h-5 w-5 border border-primary/20">
-                    <AvatarImage src={(selectedChild as any)?.avatar_url} />
-                    <AvatarFallback className="text-[8px] font-bold bg-muted">
-                      {getInitials((selectedChild as any)?.full_name || '')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="font-bold truncate max-w-[150px]">
-                    {(selectedChild as any)?.full_name}
-                  </span>
-                </div>
+                <span className="font-bold">{(selectedChild as any)?.full_name}</span>
               )}
             </SelectValue>
           </SelectTrigger>
 
-          <SelectContent className="max-h-[400px] rounded-2xl shadow-xl border-primary/10">
-            {/* OPSI 1: DIRI SENDIRI */}
-            <SelectItem value={String(user?.id)} className="rounded-lg">
-              <div className="flex items-center gap-2 py-0.5">
-                <UserCircle className="h-4 w-4 text-primary" />
-                <span className="text-[11px] font-bold">Agenda Saya (Pribadi)</span>
-              </div>
-            </SelectItem>
-
-            {/* OPSI 2: SEMUA TIM */}
-            <SelectItem value="all" className="rounded-lg">
-              <div className="flex items-center gap-2 py-0.5 text-primary font-bold text-[11px]">
-                <Users className="h-4 w-4" />
-                <span>Seluruh Anggota Tim</span>
-              </div>
-            </SelectItem>
-
+          <SelectContent className="max-h-[400px] rounded-2xl shadow-xl">
+            <SelectItem value={String(user?.id)} className="text-[11px] font-bold">Agenda Saya</SelectItem>
+            <SelectItem value="all" className="text-[11px] font-bold text-primary">Seluruh Anggota Tim</SelectItem>
+            
             <div className="h-px bg-border/50 my-1.5" />
 
-            {/* LIST BAWAHAN REKURSIF */}
             {isLoadingUsers ? (
-              <div className="p-4 flex justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-primary/40" />
-              </div>
+              <Loader2 className="h-4 w-4 animate-spin mx-auto my-4" />
             ) : (
-              Object.entries(filteredAndGrouped).map(([officeName, members]) => (
+              Object.entries(groupedByOffice).map(([officeName, members]) => (
                 <SelectGroup key={officeName}>
-                  <SelectLabel className="px-2 py-1.5 text-[9px] font-black text-primary/60 uppercase bg-primary/5 mb-1 sticky top-0 z-10 rounded-sm">
-                    {officeName}
-                  </SelectLabel>
-                  
+                  <SelectLabel className="px-2 py-1 text-[9px] font-black uppercase bg-muted/30">{officeName}</SelectLabel>
                   {members.map((child: any) => (
-                    <SelectItem 
-                      key={child.id} 
-                      value={String(child.id)} 
-                      className="pl-2 rounded-lg"
-                    >
-                      <div className="flex items-center gap-1 py-0.5">
-                        {/* Visual Indentasi untuk Level Hirarki */}
+                    <SelectItem key={child.id} value={String(child.id)} className="pl-2">
+                      <div className="flex items-center gap-1">
+                        {/* Garis hirarki agar Admin tahu Yatno di bawah Siti */}
                         {Array.from({ length: child.depth || 0 }).map((_, i) => (
-                          <div key={i} className="w-3 border-l h-5 ml-1.5 border-primary/20" />
+                          <div key={i} className="w-2.5 border-l h-4 ml-1 border-primary/20" />
                         ))}
-                        
-                        {child.depth > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/50 mr-0.5" />}
-                        
-                        <Avatar className="h-6 w-6 border border-border/60">
+                        <Avatar className="h-5 w-5">
                           <AvatarImage src={child.avatar_url} />
-                          <AvatarFallback className="text-[8px] font-bold">
-                            {getInitials(child.full_name || '')}
-                          </AvatarFallback>
+                          <AvatarFallback className="text-[7px]">{getInitials(child.full_name)}</AvatarFallback>
                         </Avatar>
-                        
-                        <div className="flex flex-col leading-tight min-w-0 ml-1">
-                          <span className={`text-[11px] truncate ${child.depth === 0 ? 'font-bold' : 'font-medium text-muted-foreground'}`}>
-                            {child.full_name}
-                          </span>
-                          <span className="text-[8px] text-muted-foreground/70 font-mono uppercase">
-                            {child.nik || 'STAFF'}
-                          </span>
-                        </div>
+                        <span className="text-[11px] truncate">{child.full_name}</span>
                       </div>
                     </SelectItem>
                   ))}

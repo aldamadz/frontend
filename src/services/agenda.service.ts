@@ -1,72 +1,109 @@
 // d:/Koding/Agenda Flow/frontend/src/services/agenda.service.ts
 import { supabase } from '@/lib/supabase';
 import { Agenda, AgendaStatus } from '@/types/agenda';
-import { getUserHierarchy } from './parent-user.service'; // Pastikan import ini tersedia
 
 /**
- * Adapter: Mengubah format database (snake_case) ke format aplikasi (camelCase)
- * Menambahkan mapping profil agar UI bisa menampilkan siapa pemilik agendanya
+ * ADAPTER: Menyamakan database (snake_case) ke UI (camelCase)
  */
-const mapAgenda = (db: any): Agenda => ({
-  id: db.id,
-  title: db.title,
-  description: db.description,
-  location: db.location,
-  status: db.status as AgendaStatus,
-  startTime: db.start_time,
-  endTime: db.end_time,
-  createdBy: db.created_by,
-  createdAt: db.created_at,
-  completedAt: db.completed_at,
-  deletedAt: db.deleted_at,
-  // Mapping join profile (opsional, sesuaikan dengan interface Agenda Anda)
-  profiles: db.profiles ? {
-    id: db.profiles.id,
-    fullName: db.profiles.full_name,
-    avatarUrl: db.profiles.avatar_url,
-    offices: db.profiles.offices
-  } : null
-});
+const mapAgenda = (db: any): Agenda => {
+  const officeData = Array.isArray(db.profiles?.offices) 
+    ? db.profiles.offices[0] 
+    : db.profiles?.offices;
+
+  return {
+    id: db.id,
+    title: db.title,
+    description: db.description,
+    location: db.location,
+    status: db.status as AgendaStatus,
+    startTime: db.start_time,
+    endTime: db.end_time,
+    createdBy: db.created_by,
+    createdAt: db.created_at,
+    completedAt: db.completed_at,
+    deletedAt: db.deleted_at,
+    profiles: db.profiles ? {
+      id: db.profiles.id,
+      fullName: db.profiles.full_name,
+      avatarUrl: db.profiles.avatar_url,
+      officeName: officeData?.name || 'PUSAT'
+    } : null
+  };
+};
 
 /**
- * FUNGSI UTAMA UNTUK ATASAN: Mengambil agenda turunan secara rekursif
+ * REKURSI: Mengambil semua ID bawahan (Anak, Cucu, dst)
+ */
+async function getAllSubordinateIds(parentId: string): Promise<string[]> {
+  const { data: allProfiles, error } = await supabase
+    .from('profiles')
+    .select('id, parent_id')
+    .is('deleted_at', null);
+
+  if (error || !allProfiles) return [parentId];
+
+  const resultIds: string[] = [parentId];
+  const findChildrenRecursive = (targetId: string) => {
+    const children = allProfiles.filter(p => p.parent_id === targetId);
+    children.forEach(child => {
+      if (!resultIds.includes(child.id)) {
+        resultIds.push(child.id);
+        findChildrenRecursive(child.id);
+      }
+    });
+  };
+
+  findChildrenRecursive(parentId);
+  return resultIds;
+}
+
+/**
+ * FUNGSI UTAMA UNTUK ATASAN
  */
 export async function getAgendasForParent(
   parentId: string,
   selectedUserId?: string | null,
-  officeId?: string | null // Tambahkan ini sebagai argumen ke-3
+  officeId?: string | null
 ) {
   try {
     let targetIds: string[];
 
-    // Jika user memilih bawahan spesifik
-    if (selectedUserId && selectedUserId !== "all") {
+    // 1. Logika Penentuan Target User
+    if (selectedUserId && selectedUserId !== "all" && selectedUserId !== "") {
+      // Jika pilih perorangan (Yatno), fokus hanya ke ID tersebut
       targetIds = [selectedUserId];
     } else {
-      // Ambil seluruh hirarki (Anak, Cucu, dst)
-      targetIds = await getUserHierarchy(parentId);
+      // Jika pilih "Semua", ambil seluruh hirarki
+      targetIds = await getAllSubordinateIds(parentId);
     }
 
-    if (!targetIds || targetIds.length === 0) return [];
+    if (targetIds.length === 0) return [];
+
+    // 2. Membangun Query
+    // Kita gunakan !inner pada profiles jika filter kantor aktif agar data yang tidak cocok langsung terbuang
+    const profileRelation = (officeId && officeId !== 'all' && officeId !== 'all_offices')
+      ? 'profiles:created_by!inner'
+      : 'profiles:created_by';
 
     let query = supabase
       .from('agendas')
       .select(`
         *,
-        profiles:created_by (
+        ${profileRelation} (
           id, 
           full_name, 
           avatar_url,
+          office_id,
           offices:office_id ( name )
         )
       `)
       .in('created_by', targetIds)
       .is('deleted_at', null);
 
-    // Tambahkan filter kantor jika dipilih
-    if (officeId && officeId !== 'all') {
-      // Karena office_id ada di tabel profiles, kita filter via join
-      query = query.filter('profiles.office_id', 'eq', officeId);
+    // 3. Tambahkan filter kantor HANYA jika tidak sedang pilih perorangan
+    // (Atau tetap tambahkan jika ingin hasil yang sangat spesifik)
+    if (officeId && officeId !== 'all' && officeId !== 'all_offices') {
+      query = query.eq('profiles.office_id', officeId);
     }
 
     const { data, error } = await query.order('start_time', { ascending: false });
@@ -78,13 +115,14 @@ export async function getAgendasForParent(
     return [];
   }
 }
+
 /**
- * Mengambil daftar agenda aktif (User biasa/Personal)
+ * Mengambil daftar agenda aktif (Personal)
  */
 export const getAgendas = async (): Promise<Agenda[]> => {
   const { data, error } = await supabase
     .from('agendas')
-    .select('*')
+    .select(`*, profiles:created_by(id, full_name, avatar_url, offices:office_id(name))`)
     .is('deleted_at', null)
     .order('start_time', { ascending: true });
 
@@ -93,22 +131,12 @@ export const getAgendas = async (): Promise<Agenda[]> => {
 };
 
 /**
- * Menyimpan Agenda (Tambah Baru atau Update)
+ * Simpan / Update / Delete (Tetap seperti kode Anda sebelumnya)
  */
-export const saveAgenda = async (
-  agendaData: Partial<Agenda> & { startTime?: any; endTime?: any },
-  id?: string | number, 
-  oldAgenda?: Agenda 
-) => {
+export const saveAgenda = async (agendaData: Partial<Agenda> & { startTime?: any; endTime?: any }, id?: string | number, oldAgenda?: Agenda) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sesi tidak ditemukan.");
-
-  const ensureString = (val: any) => {
-    if (!val) return null;
-    const date = new Date(val);
-    return !isNaN(date.getTime()) ? date.toISOString() : null;
-  };
-
+  const ensureString = (val: any) => { if (!val) return null; const date = new Date(val); return !isNaN(date.getTime()) ? date.toISOString() : null; };
   const payload: any = {
     title: agendaData.title,
     description: agendaData.description,
@@ -117,52 +145,17 @@ export const saveAgenda = async (
     start_time: agendaData.startTime ? ensureString(agendaData.startTime) : oldAgenda?.startTime, 
     end_time: agendaData.endTime ? ensureString(agendaData.endTime) : oldAgenda?.endTime,
   };
-
   if (!id) payload.created_by = user.id;
-
-  if (payload.status === 'Completed') {
-    payload.completed_at = new Date().toISOString();
-  } else if (agendaData.status) {
-    payload.completed_at = null;
-  }
-
-  const { data, error } = id 
-    ? await supabase.from('agendas').update(payload).eq('id', id).select()
-    : await supabase.from('agendas').insert([payload]).select();
-
+  if (payload.status === 'Completed') payload.completed_at = new Date().toISOString();
+  else if (agendaData.status) payload.completed_at = null;
+  const selectStr = `*, profiles:created_by(id, full_name, avatar_url, offices:office_id(name))`;
+  const { data, error } = id ? await supabase.from('agendas').update(payload).eq('id', id).select(selectStr) : await supabase.from('agendas').insert([payload]).select(selectStr);
   if (error) throw error;
   return mapAgenda(data[0]);
 };
 
-export const createAgenda = async (data: Partial<Agenda>) => {
-  return await saveAgenda(data as any);
-};
-
-export const updateAgenda = async (id: string | number, updates: any) => {
-  const { data: oldData } = await supabase
-    .from('agendas')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  const oldAgenda = oldData ? mapAgenda(oldData) : undefined;
-  const fullPayload = { ...oldAgenda, ...updates };
-  return await saveAgenda(fullPayload, id, oldAgenda);
-};
-
-export const updateAgendaStatus = async (id: string | number, status: AgendaStatus, oldAgenda?: Agenda) => {
-  return await saveAgenda({ ...oldAgenda, status }, id, oldAgenda);
-};
-
+export const updateAgendaStatus = async (id: string | number, status: AgendaStatus, oldAgenda?: Agenda) => saveAgenda({ ...oldAgenda, status }, id, oldAgenda);
 export const deleteAgenda = async (id: string | number) => {
-  const { error } = await supabase
-    .from('agendas')
-    .update({ 
-      deleted_at: new Date().toISOString(), 
-      status: 'Deleted' 
-    })
-    .eq('id', id);
-
-  if (error) throw error;
-  return true;
+  const { error } = await supabase.from('agendas').update({ deleted_at: new Date().toISOString(), status: 'Deleted' }).eq('id', id);
+  return !error;
 };

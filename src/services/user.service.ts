@@ -1,16 +1,14 @@
-// D:/Koding/Agenda Flow/frontend/src/services/user.service.ts
+// frontend/src/services/user.service.ts
 import { createClient } from '@supabase/supabase-js'; 
 import { supabase } from '@/lib/supabase';
 import type { User } from '@/types/agenda';
 import { toUIUser } from '@/adapters/user.adapter';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
 
 /**
  * INSTANCE KHUSUS REGISTRASI
- * Digunakan agar saat mendaftarkan user baru, session Admin tidak tertimpa.
- * persistSession: false memastikan token user baru tidak disimpan ke localStorage.
  */
 const registrationClient = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -21,14 +19,31 @@ const registrationClient = createClient(supabaseUrl, supabaseKey, {
 });
 
 /**
- * Mengambil semua daftar user dengan join ke tabel departments dan offices.
+ * Helper untuk menangani hasil join Supabase yang sering terbaca sebagai Array oleh TS
+ */
+const getJoinData = (data: any) => {
+  if (Array.isArray(data)) return data[0];
+  return data;
+};
+
+/**
+ * Mengambil semua daftar user
  */
 export async function getUsers(): Promise<User[]> {
   try {
     const { data, error } = await supabase
       .from('profiles')
       .select(`
-        *,
+        id,
+        email,
+        full_name,
+        nik,
+        job_title,
+        role,
+        avatar_url,
+        office_id,
+        department_id,
+        parent_id,
         departments ( name ),
         offices ( name )
       `)
@@ -38,11 +53,16 @@ export async function getUsers(): Promise<User[]> {
 
     return (data || []).map(item => {
       const user = toUIUser(item);
+      // Perbaikan TS2339: Pastikan kita mengambil objek pertama jika hasil join adalah array
+      const dept = getJoinData(item.departments);
+      const office = getJoinData(item.offices);
+
       return {
         ...user,
+        email: item.email,
         photoUrl: item.avatar_url || user.photoUrl,
-        departmentName: item.departments?.name || 'UMUM',
-        officeName: item.offices?.name || 'PUSAT' 
+        departmentName: dept?.name || 'UMUM',
+        officeName: office?.name || 'PUSAT' 
       };
     });
   } catch (error) {
@@ -52,24 +72,24 @@ export async function getUsers(): Promise<User[]> {
 }
 
 /**
- * Memperbarui data profil (Role, Atasan, atau Departemen).
+ * Memperbarui data profil
  */
-export async function updateUserProfile(userId: string, updates: any) {
+export async function updateUserProfile(userId: string, updates: Partial<User>) {
   try {
     const finalPayload: any = {
-      full_name: updates.fullName || updates.full_name,
+      full_name: updates.fullName,
+      email: updates.email,
       nik: updates.nik,
-      job_title: updates.jobTitle || updates.job_title,
+      job_title: updates.jobTitle,
       role: updates.role,
-      office_id: updates.officeId !== undefined ? updates.officeId : undefined,
-      department_id: updates.departmentId !== undefined ? updates.departmentId : undefined,
-      // Perbaikan Krusial: Pastikan null dikirim jika "none"
+      // Perbaikan TS2367: Konversi ke String aman
+      office_id: (String(updates.officeId) === "none" || !updates.officeId) ? null : Number(updates.officeId),
+      department_id: (String(updates.departmentId) === "none" || !updates.departmentId) ? null : Number(updates.departmentId),
       parent_id: (updates.parentId === "none" || !updates.parentId) ? null : updates.parentId,
       updated_at: new Date().toISOString()
     };
 
-    // Hanya hapus yang benar-benar tidak dikirim (undefined)
-    // Jangan hapus yang bernilai null (karena null digunakan untuk mengosongkan atasan)
+    // Bersihkan properti undefined
     Object.keys(finalPayload).forEach(key => {
       if (finalPayload[key] === undefined) delete finalPayload[key];
     });
@@ -90,7 +110,7 @@ export async function updateUserProfile(userId: string, updates: any) {
 }
 
 /**
- * Mengambil daftar bawahan langsung (one-level) berdasarkan parentId.
+ * Mengambil daftar bawahan
  */
 export async function getSubordinates(parentId: string): Promise<User[]> {
   try {
@@ -100,14 +120,18 @@ export async function getSubordinates(parentId: string): Promise<User[]> {
       .eq('parent_id', parentId);
 
     if (error) throw error;
+    
     return (data || []).map(item => {
-        const user = toUIUser(item);
-        return {
-            ...user,
-            photoUrl: item.avatar_url || user.photoUrl,
-            departmentName: item.departments?.name,
-            officeName: item.offices?.name || 'PUSAT'
-        };
+      const user = toUIUser(item);
+      const dept = getJoinData(item.departments);
+      const office = getJoinData(item.offices);
+
+      return {
+        ...user,
+        photoUrl: item.avatar_url || user.photoUrl,
+        departmentName: dept?.name || 'UMUM',
+        officeName: office?.name || 'PUSAT'
+      };
     });
   } catch (error) {
     console.error('Error fetching subordinates:', error);
@@ -116,31 +140,33 @@ export async function getSubordinates(parentId: string): Promise<User[]> {
 }
 
 /**
- * Mendaftarkan user baru TANPA mengeluarkan session Admin yang sedang login.
- * Menggunakan Trigger 'handle_new_user' di sisi database untuk mengisi tabel profiles.
+ * Mendaftarkan user baru
  */
 export const registerNewUser = async (userData: any) => {
   try {
-    // Kita gunakan registrationClient agar session Admin tidak tertukar (persistSession: false)
     const { data, error } = await registrationClient.auth.signUp({
       email: userData.email,
       password: userData.password,
       options: {
         data: {
-          full_name: userData.fullName || userData.full_name,
+          full_name: userData.fullName,
           nik: userData.nik,
-          job_title: userData.jobTitle || userData.job_title,
+          job_title: userData.jobTitle,
           role: userData.role || 'user',
-          department_id: userData.departmentId ? Number(userData.departmentId) : null,
-          office_id: userData.officeId ? Number(userData.officeId) : null,
-          parent_id: (userData.parentId && userData.parentId !== "none") ? userData.parentId : null
+          department_id: (userData.departmentId && String(userData.departmentId) !== "none") 
+            ? Number(userData.departmentId) 
+            : null,
+          office_id: (userData.officeId && String(userData.officeId) !== "none") 
+            ? Number(userData.officeId) 
+            : null,
+          parent_id: (userData.parentId && userData.parentId !== "none") 
+            ? userData.parentId 
+            : null
         }
       }
     });
 
     if (error) throw error;
-    
-    console.log("Registrasi berhasil, profil akan dibuat otomatis oleh trigger database.");
     return data.user;
   } catch (error) {
     console.error("Error in registerNewUser service:", error);

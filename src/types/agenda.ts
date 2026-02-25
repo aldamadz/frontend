@@ -47,6 +47,7 @@ export interface Agenda {
     id: string;
     fullName: string;
     avatarUrl?: string | null;
+    officeName?: string;
     offices?: {
       name: string;
     };

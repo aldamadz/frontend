@@ -62,85 +62,80 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
     localStorage.setItem('surat_notifs', JSON.stringify(notifications))
   }, [notifications])
 
-  // 3. REALTIME LOGIC (REJECT, APPROVE, COMPLETED)
+// 3. REALTIME LOGIC (FIXED FOR STEP 1)
   useEffect(() => {
     let channel: any;
 
     const initRealtime = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) return;
+      const currentUser = session?.user;
+      if (!currentUser) return;
 
-      channel = supabase.channel(`user-notifs-${user.id}`)
-        
-        // A. NOTIF UNTUK PEMERIKSA: Ada Surat Masuk Baru
+      channel = supabase.channel(`smart-notifs-${currentUser.id}`)
         .on('postgres_changes', { 
-          event: 'INSERT', 
+          event: '*', 
           schema: 'public', 
-          table: 'surat_signatures',
-          filter: `user_id=eq.${user.id}` 
-        }, (payload) => {
-          addNotif({
-            id: `in-${payload.new.id}`,
-            title: 'Permintaan Stamp Baru',
-            description: `Dokumen baru memerlukan verifikasi Anda.`,
-            type: 'incoming',
-            time: new Date(),
-            isRead: false
-          })
-          queryClient.invalidateQueries({ queryKey: ['surat-inbox'] })
-        })
+          table: 'surat_registrasi' 
+        }, async (payload) => {
+          const newData = payload.new as any;
+          const oldData = payload.old as any;
+          
+          if (!newData || !newData.id) return;
 
-        // B. NOTIF UNTUK PEMBUAT: Update Status (Approve/Reject/Selesai)
-        .on('postgres_changes', { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'surat_registrasi',
-          filter: `created_by=eq.${user.id}` 
-        }, (payload) => {
-          const newData = payload.new;
-          const oldData = payload.old;
+          try {
+            const isNew = payload.eventType === 'INSERT';
+            const isStepUpdate = payload.eventType === 'UPDATE' && oldData && newData.current_step !== oldData.current_step;
 
-          // Kondisi 1: DITOLAK (REJECTED)
-          if (newData.status === 'REJECTED' && oldData.status !== 'REJECTED') {
-            addNotif({
-              id: `rej-${newData.id}-${Date.now()}`,
-              title: 'Dokumen Ditolak',
-              description: `Surat "${newData.judul_surat}" telah ditolak oleh pimpinan.`,
-              type: 'rejected',
-              time: new Date(),
-              isRead: false
-            })
-          } 
-          // Kondisi 2: SELESAI (ALL STEPS DONE)
-          else if (newData.status === 'SELESAI' && oldData.status !== 'SELESAI') {
-            addNotif({
-              id: `done-${newData.id}`,
-              title: 'Dokumen Selesai!',
-              description: `Surat "${newData.judul_surat}" telah selesai di-approve semua pihak.`,
-              type: 'completed',
-              time: new Date(),
-              isRead: false
-            })
-          } 
-          // Kondisi 3: TIAP STEP DI-APPROVE (PROGRES)
-          else if (newData.current_step > oldData.current_step) {
-            addNotif({
-              id: `step-${newData.id}-${newData.current_step}`,
-              title: 'Update Progres Stamp',
-              description: `Surat "${newData.judul_surat}" telah distamp di Step ${oldData.current_step}.`,
-              type: 'stamped',
-              time: new Date(),
-              isRead: false
-            })
+            if (isNew || isStepUpdate) {
+              // KHUSUS INSERT: Tunggu 1 detik agar data di surat_signatures selesai di-insert oleh sistem
+              if (isNew) {
+                await new Promise(resolve => setTimeout(resolve, 1200));
+              }
+
+              const { data: myTurn, error: queryError } = await supabase
+                .from('surat_signatures')
+                .select('id, role_name')
+                .eq('surat_id', newData.id)
+                .eq('user_id', currentUser.id)
+                .eq('step_order', Number(newData.current_step))
+                .maybeSingle();
+
+              if (queryError) console.error("Query Error:", queryError);
+
+              if (myTurn) {
+                addNotif({
+                  id: `in-${newData.id}-${newData.current_step}`,
+                  title: 'Permintaan Stamp Baru',
+                  description: `Surat "${newData.judul_surat}" menunggu verifikasi Anda sebagai ${myTurn.role_name}.`,
+                  type: 'incoming',
+                  time: new Date(),
+                  isRead: false
+                });
+                queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
+              }
+            }
+
+            // B. LOGIKA UNTUK PEMBUAT (NOTIF PROGRES)
+            if (newData.created_by === currentUser.id && payload.eventType === 'UPDATE' && oldData) {
+               // ... (Logika status REJECTED, SELESAI, STAMPED tetap sama seperti sebelumnya)
+               if (newData.status === 'REJECTED' && oldData.status !== 'REJECTED') {
+                addNotif({ id: `rej-${newData.id}-${Date.now()}`, title: 'Dokumen Ditolak', description: `Surat "${newData.judul_surat}" telah ditolak.`, type: 'rejected', time: new Date(), isRead: false });
+              } else if (newData.status === 'SELESAI' && oldData.status !== 'SELESAI') {
+                addNotif({ id: `done-${newData.id}`, title: 'Dokumen Selesai!', description: `Surat "${newData.judul_surat}" telah disetujui sepenuhnya.`, type: 'completed', time: new Date(), isRead: false });
+              } else if (Number(newData.current_step) > Number(oldData.current_step)) {
+                addNotif({ id: `step-${newData.id}-${newData.current_step}`, title: 'Update Progres', description: `Surat "${newData.judul_surat}" disetujui pada Step ${oldData.current_step}.`, type: 'stamped', time: new Date(), isRead: false });
+              }
+              queryClient.invalidateQueries({ queryKey: ['surat-list'] });
+            }
+          } catch (err) {
+            console.error("Notification Processing Error:", err);
           }
-          queryClient.invalidateQueries({ queryKey: ['surat-list'] })
         })
         .subscribe();
     }
 
-    initRealtime()
-    return () => { if (channel) supabase.removeChannel(channel) }
+    initRealtime();
+    return () => { if (channel) supabase.removeChannel(channel); }
   }, [addNotif, queryClient])
 
   return (

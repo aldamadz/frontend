@@ -24,7 +24,8 @@ import { getDepartments, Department } from '@/services/department.service';
 import { getOffices } from '@/services/office.service';
 import { Office } from '@/types/office';
 import { toast } from 'sonner';
-import { Building2, Briefcase, UserCog, UserCircle, Fingerprint } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { Building2, Briefcase, UserCog, UserCircle, Fingerprint, Mail, Loader2, ShieldCheck, User as UserIcon } from 'lucide-react';
 
 interface EditUserModalProps {
   user: User | null;
@@ -39,14 +40,15 @@ export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: Ed
   const [departments, setDepartments] = useState<Department[]>([]);
   const [offices, setOffices] = useState<Office[]>([]);
   
-  const [formData, setFormData] = useState<Partial<User>>({
+  const [formData, setFormData] = useState({
+    email: '',
     fullName: '',
     nik: '',
-    role: 'user',
+    role: 'user' as Role,
     jobTitle: '',
-    departmentId: null,
-    officeId: null,
-    parentId: null
+    departmentId: 'none' as string | number,
+    officeId: 'none' as string | number,
+    parentId: 'none' as string
   });
 
   // 1. Fetch Master Data
@@ -68,17 +70,18 @@ export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: Ed
     }
   }, [isOpen]);
 
-  // 2. Sinkronkan data user ke Form
+  // 2. Sinkronkan data user ke Form saat modal dibuka
   useEffect(() => {
     if (user && isOpen) {
       setFormData({
+        email: user.email || '',
         fullName: user.fullName || '',
         nik: user.nik || '',
-        role: user.role || 'user',
-        departmentId: user.departmentId,
-        officeId: user.officeId,
+        role: (user.role as Role) || 'user',
         jobTitle: user.jobTitle || '',
-        parentId: user.parentId // Nilainya bisa UUID atau null
+        departmentId: user.departmentId ? String(user.departmentId) : 'none',
+        officeId: user.officeId ? String(user.officeId) : 'none',
+        parentId: user.parentId || 'none'
       });
     }
   }, [user, isOpen]);
@@ -86,30 +89,43 @@ export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: Ed
   const handleSave = async () => {
     if (!user) return;
     
+    if (!formData.email || !formData.fullName || !formData.nik) {
+      return toast.error("Email, Nama, dan NIK wajib diisi");
+    }
+
     setLoading(true);
     try {
-      // PERBAIKAN LOGIKA PAYLOAD
+      // STEP 1: Sinkronisasi AUTH via Edge Function
+      const { error: edgeError } = await supabase.functions.invoke('admin-update-user', {
+        body: { 
+          userId: user.id, 
+          newEmail: formData.email, 
+          newFullName: formData.fullName 
+        }
+      });
+
+      if (edgeError) throw new Error(`Auth Update Error: ${edgeError.message}`);
+
+      // STEP 2: Update Profile
       const payload = {
         fullName: formData.fullName,
+        email: formData.email,
         nik: formData.nik,
         jobTitle: formData.jobTitle,
         role: formData.role,
-        officeId: formData.officeId,
-        departmentId: formData.departmentId,
-        // Pastikan jika "none" dikirim sebagai null agar kolom di DB terupdate jadi NULL
-        parentId: (formData.parentId === "none" || !formData.parentId) ? null : formData.parentId
+        officeId: formData.officeId === "none" ? null : Number(formData.officeId),
+        departmentId: formData.departmentId === "none" ? null : Number(formData.departmentId),
+        parentId: formData.parentId === "none" ? null : formData.parentId
       };
-
-      console.log("Mengirim update untuk parentId:", payload.parentId);
 
       await updateUserProfile(user.id, payload);
       
-      toast.success("Profil user berhasil diperbarui");
+      toast.success("Data karyawan berhasil diperbarui");
       onSuccess();
       onClose();
     } catch (error: any) {
       console.error("Update Error:", error);
-      toast.error("Gagal memperbarui profil: " + error.message);
+      toast.error("Gagal memperbarui: " + (error.message || "Terjadi kesalahan"));
     } finally {
       setLoading(false);
     }
@@ -117,129 +133,171 @@ export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: Ed
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
-          <div className="flex items-center gap-2 text-primary">
-            <UserCog className="w-5 h-5" />
-            <DialogTitle>Edit Profil Karyawan</DialogTitle>
-          </div>
-          <DialogDescription>
-            Sesuaikan informasi identitas, jabatan, dan penempatan kerja karyawan.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[600px] bg-card border-border shadow-2xl p-0 overflow-hidden">
+        <div className="p-6 pb-0">
+          <DialogHeader>
+            <div className="flex items-center gap-3 text-primary mb-1">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <UserCog className="w-6 h-6" />
+              </div>
+              <DialogTitle className="text-2xl font-extrabold tracking-tight">Edit Profil Karyawan</DialogTitle>
+            </div>
+            <DialogDescription className="text-muted-foreground font-medium">
+              Update kredensial login dan informasi struktural karyawan.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
         
-        <div className="grid gap-5 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-2">
-                <UserCircle className="w-4 h-4" /> Nama Lengkap
-              </Label>
-              <Input 
-                value={formData.fullName || ''} 
-                onChange={(e) => setFormData({...formData, fullName: e.target.value})}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-2">
-                <Fingerprint className="w-4 h-4" /> NIK
-              </Label>
-              <Input 
-                value={formData.nik || ''} 
-                placeholder="Masukkan NIK asli"
-                className={formData.nik?.includes('PENDING') ? "border-red-500 bg-red-50" : ""}
-                onChange={(e) => setFormData({...formData, nik: e.target.value})}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Jabatan</Label>
-              <Input 
-                placeholder="Contoh: Manager"
-                value={formData.jobTitle || ''} 
-                onChange={(e) => setFormData({...formData, jobTitle: e.target.value})}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Role Akses</Label>
-              <Select 
-                value={formData.role} 
-                onValueChange={(v: Role) => setFormData({...formData, role: v})}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">User / Staff</SelectItem>
-                  <SelectItem value="admin">Administrator</SelectItem>
-                </SelectContent>
-              </Select>
+        <div className="p-6 space-y-6">
+          {/* Section 1: Akun & Identitas Utama */}
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase px-1">Kredensial & Identitas</h4>
+            <div className="grid grid-cols-2 gap-4 bg-secondary/30 p-4 rounded-xl border border-border/50">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2">
+                  <Mail className="w-3.5 h-3.5 text-muted-foreground" /> Email Kerja
+                </Label>
+                <Input 
+                  type="email"
+                  value={formData.email} 
+                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  className="bg-background h-10"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2">
+                  <UserCircle className="w-3.5 h-3.5 text-muted-foreground" /> Nama Lengkap
+                </Label>
+                <Input 
+                  value={formData.fullName} 
+                  onChange={(e) => setFormData({...formData, fullName: e.target.value})}
+                  className="bg-background h-10"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-1">
-                <Building2 className="w-3 h-3" /> Kantor
-              </Label>
-              <Select 
-                value={formData.officeId ? String(formData.officeId) : "none"}
-                onValueChange={(v) => setFormData({...formData, officeId: v === "none" ? null : Number(v)})}
-              >
-                <SelectTrigger><SelectValue placeholder="Pilih Kantor" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Belum Ditentukan</SelectItem>
-                  {offices.map((off) => (
-                    <SelectItem key={off.id} value={String(off.id)}>{off.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Section 2: Detail Organisasi */}
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase px-1">Informasi Jabatan</h4>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2">
+                  <Fingerprint className="w-3.5 h-3.5 text-muted-foreground" /> NIK
+                </Label>
+                <Input 
+                  value={formData.nik} 
+                  placeholder="A-001"
+                  className={`h-10 font-mono ${formData.nik?.includes('PENDING') ? "border-destructive bg-destructive/5 text-destructive" : "bg-background"}`}
+                  onChange={(e) => setFormData({...formData, nik: e.target.value})}
+                />
+              </div>
 
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-1">
-                <Briefcase className="w-3 h-3" /> Departemen
-              </Label>
-              <Select 
-                value={formData.departmentId ? String(formData.departmentId) : "none"}
-                onValueChange={(v) => setFormData({...formData, departmentId: v === "none" ? null : Number(v)})}
-              >
-                <SelectTrigger><SelectValue placeholder="Pilih Dept" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Belum Ditentukan</SelectItem>
-                  {departments.map((dept) => (
-                    <SelectItem key={dept.id} value={String(dept.id)}>{dept.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold">Hak Akses</Label>
+                <Select 
+                  value={formData.role} 
+                  onValueChange={(v: Role) => setFormData({...formData, role: v})}
+                >
+                  <SelectTrigger className="h-10 font-bold text-primary">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user"><UserIcon className="w-3 h-3 inline mr-2"/> STAFF</SelectItem>
+                    <SelectItem value="admin"><ShieldCheck className="w-3 h-3 inline mr-2"/> ADMIN</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="grid gap-2 border-t pt-4">
-            <Label>Atasan Langsung (Hirarki)</Label>
-            <Select 
-              value={formData.parentId || "none"}
-              onValueChange={(v) => setFormData({...formData, parentId: v === "none" ? null : v})}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Pilih Atasan" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Top Level (Tidak ada atasan)</SelectItem>
-                {allUsers
-                  .filter(u => u.id !== user?.id) 
-                  .map((u) => (
-                    <SelectItem key={u.id} value={String(u.id)}>{u.fullName}</SelectItem>
-                  ))
-                }
-              </SelectContent>
-            </Select>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2">
+                  <Building2 className="w-3.5 h-3.5 text-muted-foreground" /> Kantor
+                </Label>
+                <Select 
+                  value={String(formData.officeId)}
+                  onValueChange={(v) => setFormData({...formData, officeId: v})}
+                >
+                  <SelectTrigger className="h-10 bg-background">
+                    <SelectValue placeholder="Pilih Kantor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Belum Ditentukan</SelectItem>
+                    {offices.map((off) => (
+                      <SelectItem key={off.id} value={String(off.id)}>{off.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2">
+                  <Briefcase className="w-3.5 h-3.5 text-muted-foreground" /> Departemen
+                </Label>
+                <Select 
+                  value={String(formData.departmentId)}
+                  onValueChange={(v) => setFormData({...formData, departmentId: v})}
+                >
+                  <SelectTrigger className="h-10 bg-background">
+                    <SelectValue placeholder="Pilih Dept" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Belum Ditentukan</SelectItem>
+                    {departments.map((dept) => (
+                      <SelectItem key={dept.id} value={String(dept.id)}>{dept.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold">Jabatan</Label>
+                <Input 
+                  placeholder="Manager IT"
+                  value={formData.jobTitle} 
+                  className="h-10 bg-background"
+                  onChange={(e) => setFormData({...formData, jobTitle: e.target.value})}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold">Atasan Langsung</Label>
+                <Select 
+                  value={formData.parentId || "none"}
+                  onValueChange={(v) => setFormData({...formData, parentId: v})}
+                >
+                  <SelectTrigger className="h-10 bg-background">
+                    <SelectValue placeholder="Pilih Atasan" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[200px]">
+                    <SelectItem value="none" className="italic text-muted-foreground">Tidak Ada (Top Level)</SelectItem>
+                    {allUsers
+                      .filter(u => u.id !== user?.id) 
+                      .map((u) => (
+                        <SelectItem key={u.id} value={String(u.id)}>{u.fullName}</SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
         </div>
 
-        <DialogFooter className="bg-muted/50 -mx-6 -mb-6 p-4 rounded-b-lg">
-          <Button variant="outline" type="button" onClick={onClose}>Batal</Button>
-          <Button onClick={handleSave} disabled={loading}>
-            {loading ? "Menyimpan..." : "Simpan Perubahan"}
+        <DialogFooter className="bg-secondary/50 p-6 gap-3 border-t border-border mt-2">
+          <Button variant="ghost" type="button" onClick={onClose} disabled={loading} className="font-bold">
+            Batalkan
+          </Button>
+          <Button 
+            onClick={handleSave} 
+            disabled={loading} 
+            className="min-w-[160px] bg-primary text-primary-foreground font-extrabold shadow-lg shadow-primary/20"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Sinkronisasi...
+              </>
+            ) : "Simpan Perubahan"}
           </Button>
         </DialogFooter>
       </DialogContent>

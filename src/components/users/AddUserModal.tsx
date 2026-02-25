@@ -24,7 +24,7 @@ import { getDepartments, Department } from '@/services/department.service';
 import { getOffices } from '@/services/office.service';
 import { Office } from '@/types/office';
 import { toast } from 'sonner';
-import { UserPlus, Building2, Briefcase, Fingerprint, Mail, Lock } from 'lucide-react';
+import { UserPlus, Building2, Briefcase, Fingerprint, Mail, Lock, Loader2, ShieldCheck, User as UserIcon } from 'lucide-react';
 
 interface AddUserModalProps {
   isOpen: boolean;
@@ -45,12 +45,11 @@ export const AddUserModal = ({ isOpen, onClose, onSuccess, allUsers }: AddUserMo
     nik: '',
     role: 'user' as Role,
     jobTitle: '',
-    departmentId: null as number | null,
-    officeId: null as number | null,
-    parentId: null as string | null
+    departmentId: 'none' as string | number,
+    officeId: 'none' as string | number,
+    parentId: 'none' as string
   });
 
-  // Load master data saat modal dibuka
   useEffect(() => {
     if (isOpen) {
       const loadData = async () => {
@@ -64,17 +63,14 @@ export const AddUserModal = ({ isOpen, onClose, onSuccess, allUsers }: AddUserMo
       };
       
       loadData();
-      
-      // Reset form
       setFormData({
         email: '', password: '', fullName: '', nik: '',
-        role: 'user', jobTitle: '', departmentId: null, officeId: null, parentId: null
+        role: 'user', jobTitle: '', departmentId: 'none', officeId: 'none', parentId: 'none'
       });
     }
   }, [isOpen]);
 
   const handleSave = async () => {
-    // Validasi dasar
     if (!formData.email || !formData.fullName || !formData.nik || !formData.password) {
       return toast.error("Email, Password, Nama, dan NIK wajib diisi");
     }
@@ -85,15 +81,11 @@ export const AddUserModal = ({ isOpen, onClose, onSuccess, allUsers }: AddUserMo
 
     setLoading(true);
     try {
-      /**
-       * MAPPING PAYLOAD: 
-       * Kita pastikan mengirim data yang bersih ke service.
-       * Office & Dept dipastikan bertipe Number atau null (bukan string).
-       */
+      // Pastikan payload bersih sebelum dikirim ke service
       const payload = {
         ...formData,
-        officeId: formData.officeId ? Number(formData.officeId) : null,
-        departmentId: formData.departmentId ? Number(formData.departmentId) : null,
+        officeId: formData.officeId === "none" ? null : Number(formData.officeId),
+        departmentId: formData.departmentId === "none" ? null : Number(formData.departmentId),
         parentId: formData.parentId === "none" ? null : formData.parentId
       };
 
@@ -111,134 +103,176 @@ export const AddUserModal = ({ isOpen, onClose, onSuccess, allUsers }: AddUserMo
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[550px]">
-        <DialogHeader>
-          <div className="flex items-center gap-2 text-primary">
-            <UserPlus className="w-5 h-5" />
-            <DialogTitle>Registrasi Karyawan Baru</DialogTitle>
-          </div>
-          <DialogDescription>
-            Masukkan data akun dan profil karyawan baru. Pastikan NIK sesuai dengan data HR.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[600px] bg-card border-border shadow-2xl p-0 overflow-hidden">
+        {/* Header dengan Gradient */}
+        <div className="p-6 pb-0">
+          <DialogHeader>
+            <div className="flex items-center gap-3 text-primary mb-1">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <UserPlus className="w-6 h-6" />
+              </div>
+              <DialogTitle className="text-2xl font-extrabold tracking-tight text-gradient">
+                Registrasi Karyawan
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-muted-foreground font-medium">
+              Sistem akan membuat akun login dan profil database secara otomatis.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
         
-        <div className="grid gap-5 py-4">
-          {/* Akun Section */}
-          <div className="grid grid-cols-2 gap-4 border-b pb-4 bg-muted/30 p-4 rounded-lg">
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-2"><Mail className="w-3 h-3"/> Email Kerja</Label>
-              <Input 
-                type="email" 
-                placeholder="karyawan@perusahaan.com" 
-                value={formData.email} 
-                onChange={(e) => setFormData({...formData, email: e.target.value})} 
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-2"><Lock className="w-3 h-3"/> Password</Label>
-              <Input 
-                type="password" 
-                placeholder="Min. 6 Karakter" 
-                value={formData.password} 
-                onChange={(e) => setFormData({...formData, password: e.target.value})} 
-              />
-            </div>
-          </div>
-
-          {/* Profil Section */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Nama Lengkap</Label>
-              <Input 
-                placeholder="John Doe" 
-                value={formData.fullName} 
-                onChange={(e) => setFormData({...formData, fullName: e.target.value})} 
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-1"><Fingerprint className="w-3 h-3"/> NIK</Label>
-              <Input 
-                placeholder="A-001" 
-                value={formData.nik} 
-                onChange={(e) => setFormData({...formData, nik: e.target.value})} 
-              />
+        <div className="p-6 space-y-6">
+          {/* Section: Akun Login (Glass Effect) */}
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase px-1">Informasi Kredensial</h4>
+            <div className="grid grid-cols-2 gap-4 bg-secondary/30 p-4 rounded-xl border border-border/50 backdrop-blur-sm">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2"><Mail className="w-3.5 h-3.5 text-muted-foreground"/> Email Kerja</Label>
+                <Input 
+                  type="email" 
+                  placeholder="name@company.com" 
+                  className="bg-background border-border focus:ring-primary h-10"
+                  value={formData.email} 
+                  onChange={(e) => setFormData({...formData, email: e.target.value})} 
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2"><Lock className="w-3.5 h-3.5 text-muted-foreground"/> Password</Label>
+                <Input 
+                  type="password" 
+                  placeholder="••••••••" 
+                  className="bg-background border-border focus:ring-primary h-10"
+                  value={formData.password} 
+                  onChange={(e) => setFormData({...formData, password: e.target.value})} 
+                />
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-1"><Building2 className="w-3 h-3" /> Kantor</Label>
+          {/* Section: Profil & Organisasi */}
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase px-1">Data Organisasi</h4>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold">Nama Lengkap</Label>
+                <Input 
+                  placeholder="Masukkan nama sesuai KTP" 
+                  className="bg-background border-border h-10"
+                  value={formData.fullName} 
+                  onChange={(e) => setFormData({...formData, fullName: e.target.value})} 
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2"><Fingerprint className="w-3.5 h-3.5 text-muted-foreground"/> NIK</Label>
+                <Input 
+                  placeholder="Contoh: 2024001" 
+                  className="bg-background border-border h-10 font-mono"
+                  value={formData.nik} 
+                  onChange={(e) => setFormData({...formData, nik: e.target.value})} 
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2"><Building2 className="w-3.5 h-3.5 text-muted-foreground"/> Penempatan Kantor</Label>
+                <Select 
+                  value={String(formData.officeId)} 
+                  onValueChange={(v) => setFormData({...formData, officeId: v})}
+                >
+                  <SelectTrigger className="bg-background border-border h-10">
+                    <SelectValue placeholder="Pilih Lokasi" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    <SelectItem value="none">Belum Ditentukan</SelectItem>
+                    {offices.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold flex items-center gap-2"><Briefcase className="w-3.5 h-3.5 text-muted-foreground"/> Departemen</Label>
+                <Select 
+                  value={String(formData.departmentId)}
+                  onValueChange={(v) => setFormData({...formData, departmentId: v})}
+                >
+                  <SelectTrigger className="bg-background border-border h-10">
+                    <SelectValue placeholder="Pilih Dept" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    <SelectItem value="none">Belum Ditentukan</SelectItem>
+                    {departments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold">Jabatan Resmi</Label>
+                <Input 
+                  placeholder="Contoh: Senior Manager" 
+                  className="bg-background border-border h-10"
+                  value={formData.jobTitle} 
+                  onChange={(e) => setFormData({...formData, jobTitle: e.target.value})} 
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold">Hak Akses Sistem</Label>
+                <Select 
+                  value={formData.role} 
+                  onValueChange={(v: Role) => setFormData({...formData, role: v})}
+                >
+                  <SelectTrigger className="bg-background border-border h-10 font-bold text-primary">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border font-bold">
+                    <SelectItem value="user" className="flex items-center gap-2"><UserIcon className="w-3 h-3 inline mr-2"/> STAFF / USER</SelectItem>
+                    <SelectItem value="admin" className="text-primary flex items-center gap-2"><ShieldCheck className="w-3 h-3 inline mr-2"/> ADMINISTRATOR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <Label className="text-xs font-bold text-muted-foreground">Struktur Pelaporan (Atasan)</Label>
               <Select 
-                value={formData.officeId ? String(formData.officeId) : "none"} 
-                onValueChange={(v) => setFormData({...formData, officeId: v === "none" ? null : Number(v)})}
+                value={formData.parentId || "none"} 
+                onValueChange={(v) => setFormData({...formData, parentId: v})}
               >
-                <SelectTrigger><SelectValue placeholder="Pilih Lokasi" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Belum Ditentukan</SelectItem>
-                  {offices.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
+                <SelectTrigger className="bg-background border-border h-11 border-dashed">
+                  <SelectValue placeholder="Pilih Atasan Langsung" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border max-h-[200px]">
+                  <SelectItem value="none" className="font-bold text-muted-foreground italic">Top Level / Board of Directors</SelectItem>
+                  {allUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.fullName} — <span className="text-[10px] opacity-50">{u.jobTitle}</span></SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-2">
-              <Label className="flex items-center gap-1"><Briefcase className="w-3 h-3" /> Departemen</Label>
-              <Select 
-                value={formData.departmentId ? String(formData.departmentId) : "none"}
-                onValueChange={(v) => setFormData({...formData, departmentId: v === "none" ? null : Number(v)})}
-              >
-                <SelectTrigger><SelectValue placeholder="Pilih Dept" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Belum Ditentukan</SelectItem>
-                  {departments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Jabatan</Label>
-              <Input 
-                placeholder="Staff IT" 
-                value={formData.jobTitle} 
-                onChange={(e) => setFormData({...formData, jobTitle: e.target.value})} 
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Role Akses</Label>
-              <Select 
-                value={formData.role} 
-                onValueChange={(v: Role) => setFormData({...formData, role: v})}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">User / Staff</SelectItem>
-                  <SelectItem value="admin">Administrator</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label>Atasan Langsung</Label>
-            <Select 
-              value={formData.parentId || "none"} 
-              onValueChange={(v) => setFormData({...formData, parentId: v === "none" ? null : v})}
-            >
-              <SelectTrigger><SelectValue placeholder="Pilih Atasan" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Tidak Ada / Top Level</SelectItem>
-                {allUsers.map(u => (
-                  <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
 
-        <DialogFooter className="bg-muted/50 -mx-6 -mb-6 p-4 rounded-b-lg gap-2">
-          <Button variant="outline" onClick={onClose}>Batal</Button>
-          <Button onClick={handleSave} disabled={loading} className="min-w-[100px]">
-            {loading ? "Proses..." : "Simpan"}
+        {/* Footer dengan Glass Background */}
+        <DialogFooter className="bg-secondary/50 p-6 gap-3 border-t border-border">
+          <Button 
+            variant="ghost" 
+            onClick={onClose} 
+            className="font-bold hover:bg-destructive/10 hover:text-destructive transition-colors"
+          >
+            Batalkan
+          </Button>
+          <Button 
+            onClick={handleSave} 
+            disabled={loading} 
+            className="min-w-[140px] bg-primary hover:bg-primary/90 text-primary-foreground font-extrabold shadow-lg shadow-primary/20"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Mendaftarkan...
+              </>
+            ) : (
+              "Simpan User"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
