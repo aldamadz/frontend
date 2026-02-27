@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { 
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
+} from "@/components/ui/select";
+import { 
   MapPin, Plus, Pencil, Trash2, Loader2, 
-  Search, RefreshCw 
+  Search, RefreshCw, Building2 
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -24,9 +27,11 @@ export default function OfficeManagementPage() {
   const [selectedOffice, setSelectedOffice] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Update state sesuai struktur database terbaru
   const [formData, setFormData] = useState({
     name: "",
-    code: ""
+    code: "",
+    kedudukan: "KC" // KC atau KCP
   });
 
   const loadData = async () => {
@@ -57,17 +62,21 @@ export default function OfficeManagementPage() {
   const handleOpenModal = (office: any = null) => {
     if (office) {
       setSelectedOffice(office);
-      setFormData({ name: office.name, code: office.code });
+      setFormData({ 
+        name: office.name, 
+        code: office.code, 
+        kedudukan: office.kedudukan || "KC" 
+      });
     } else {
       setSelectedOffice(null);
-      setFormData({ name: "", code: "" });
+      setFormData({ name: "", code: "", kedudukan: "KC" });
     }
     setIsModalOpen(true);
   };
 
   const handleSave = async () => {
-    if (!formData.name || !formData.code) {
-      toast({ variant: "destructive", title: "Peringatan", description: "Nama dan Kode wajib diisi" });
+    if (!formData.name || !formData.code || !formData.kedudukan) {
+      toast({ variant: "destructive", title: "Peringatan", description: "Semua kolom wajib diisi" });
       return;
     }
 
@@ -75,7 +84,8 @@ export default function OfficeManagementPage() {
       setLoading(true);
       const payload = {
         name: formData.name,
-        code: formData.code.toUpperCase()
+        code: formData.code.toUpperCase(),
+        kedudukan: formData.kedudukan
       };
 
       if (selectedOffice) {
@@ -91,7 +101,7 @@ export default function OfficeManagementPage() {
         if (error) throw error;
       }
 
-      toast({ title: "Berhasil", description: "Data kantor telah diperbarui" });
+      toast({ title: "Berhasil", description: `Kantor ${formData.name} telah disimpan` });
       setIsModalOpen(false);
       loadData();
     } catch (error: any) {
@@ -118,23 +128,24 @@ export default function OfficeManagementPage() {
 
   const filteredOffices = offices.filter(o => 
     o.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    o.code.toLowerCase().includes(searchQuery.toLowerCase())
+    o.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    o.kedudukan?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <MapPin className="w-6 h-6 text-primary" /> Master Kantor Cabang
+            <Building2 className="w-6 h-6 text-primary" /> Master Kantor Cabang
           </h1>
-          <p className="text-sm text-muted-foreground">Manajemen lokasi kantor dan kode area</p>
+          <p className="text-sm text-muted-foreground">Manajemen lokasi kantor, kode area, dan kedudukan (KC/KCP)</p>
         </div>
-        <div className="flex gap-2">
-          <div className="relative w-64">
+        <div className="flex gap-2 w-full md:w-auto">
+          <div className="relative flex-1 md:w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input 
-              placeholder="Cari kantor atau kode..." 
+              placeholder="Cari kantor, kode, atau KC/KCP..." 
               className="pl-8" 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -153,21 +164,22 @@ export default function OfficeManagementPage() {
         <Table>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="w-[150px] font-bold">KODE AREA</TableHead>
+              <TableHead className="w-[120px] font-bold">KODE</TableHead>
               <TableHead className="font-bold">NAMA KANTOR / CABANG</TableHead>
+              <TableHead className="w-[120px] font-bold">KEDUDUKAN</TableHead>
               <TableHead className="text-right font-bold">AKSI</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && offices.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} className="text-center py-20">
+                <TableCell colSpan={4} className="text-center py-20">
                   <Loader2 className="animate-spin mx-auto w-8 h-8 text-primary"/>
                 </TableCell>
               </TableRow>
             ) : filteredOffices.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} className="text-center py-20 text-muted-foreground">
+                <TableCell colSpan={4} className="text-center py-20 text-muted-foreground">
                   Tidak ada data kantor ditemukan.
                 </TableCell>
               </TableRow>
@@ -180,6 +192,9 @@ export default function OfficeManagementPage() {
                     </code>
                   </TableCell>
                   <TableCell className="font-medium">{office.name}</TableCell>
+                  <TableCell>
+                    <BadgeKedudukan status={office.kedudukan} />
+                  </TableCell>
                   <TableCell className="text-right space-x-1">
                     <Button variant="ghost" size="icon" onClick={() => handleOpenModal(office)}>
                       <Pencil className="w-4 h-4 text-amber-600" />
@@ -209,14 +224,31 @@ export default function OfficeManagementPage() {
                 placeholder="E.g. Magelang"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Kode Kantor (3-4 Huruf)</Label>
-              <Input 
-                value={formData.code} 
-                onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})} 
-                placeholder="E.g. MGG"
-                maxLength={4}
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Kode Kantor</Label>
+                <Input 
+                  value={formData.code} 
+                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})} 
+                  placeholder="E.g. MGG"
+                  maxLength={4}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Kedudukan</Label>
+                <Select 
+                  value={formData.kedudukan} 
+                  onValueChange={(val) => setFormData({...formData, kedudukan: val})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="KC">KC (Cabang)</SelectItem>
+                    <SelectItem value="KCP">KCP (Pembantu)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -228,5 +260,20 @@ export default function OfficeManagementPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// Komponen Badge Kecil untuk Kedudukan
+function BadgeKedudukan({ status }: { status: string }) {
+  const isKC = status === "KC";
+  return (
+    <span className={cn(
+      "px-2 py-0.5 rounded-full text-[10px] font-black tracking-tighter border",
+      isKC 
+        ? "bg-blue-50 text-blue-700 border-blue-200" 
+        : "bg-slate-50 text-slate-600 border-slate-200"
+    )}>
+      {status}
+    </span>
   );
 }
