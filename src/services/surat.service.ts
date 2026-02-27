@@ -29,7 +29,6 @@ export interface SuratRegistrasi {
 }
 
 export const suratService = {
-  // Helper untuk membersihkan UUID dari frontend
   cleanUuid(id: any) {
     if (!id || id === "" || id === "pusat" || id === "undefined" || id === "null")
       return null;
@@ -258,18 +257,57 @@ export const suratService = {
     return publicUrl;
   },
 
-  async approveSurat(signatureId: string, suratId: string, currentStep: number, userName: string, note: string = "") {
-    const { data: sigInfo } = await supabase.from("surat_signatures").select(`role_name, surat_registrasi (file_path, penggunaan_id)`).eq("id", signatureId).single();
-    const suratData = Array.isArray(sigInfo?.surat_registrasi) ? sigInfo?.surat_registrasi[0] : sigInfo?.surat_registrasi;
+async approveSurat(signatureId: string, suratId: string, currentStep: number, userName: string, note: string = "") {
+  // 1. Ambil info signature dan surat
+  const { data: sigInfo } = await supabase
+    .from("surat_signatures")
+    .select(`role_name, surat_registrasi (file_path, penggunaan_id)`)
+    .eq("id", signatureId)
+    .single();
 
-    if (suratData?.file_path?.toLowerCase().includes(".xlsx") && suratData?.penggunaan_id) {
-      await this.stampApprovalExcel(suratId, suratData.file_path, userName, sigInfo!.role_name, suratData.penggunaan_id);
-    }
+  const suratData = Array.isArray(sigInfo?.surat_registrasi) 
+    ? sigInfo?.surat_registrasi[0] 
+    : sigInfo?.surat_registrasi;
 
-    const { data, error } = await supabase.rpc('handle_approve_surat', { p_sig_id: signatureId, p_surat_id: suratId, p_current_step: currentStep, p_signer_name: userName, p_note: note });
-    if (error) throw error;
-    return data;
-  },
+  let finalUrl = suratData?.file_path;
+
+  // 2. Jika file adalah Excel, lakukan proses stempel (menghasilkan file baru)
+  if (suratData?.file_path?.toLowerCase().includes(".xlsx") && suratData?.penggunaan_id) {
+    finalUrl = await this.stampApprovalExcel(
+      suratId, 
+      suratData.file_path, 
+      userName, 
+      sigInfo!.role_name, 
+      suratData.penggunaan_id
+    );
+  }
+
+  // 3. Update signature: set is_signed dan simpan LINK SNAPSHOT file versi ini
+  const { error: updateSigError } = await supabase
+    .from("surat_signatures")
+    .update({ 
+      is_signed: true,
+      signed_at: new Date().toISOString(),
+      file_path_snap: finalUrl, // <--- LINK DISIMPAN DI SINI
+      catatan: note,
+      status: 'SUCCESS'
+    })
+    .eq("id", signatureId);
+
+  if (updateSigError) throw updateSigError;
+
+  // 4. Lanjutkan ke RPC handle_approve_surat untuk menaikkan step_order di tabel utama
+  const { data, error } = await supabase.rpc('handle_approve_surat', { 
+    p_sig_id: signatureId, 
+    p_surat_id: suratId, 
+    p_current_step: currentStep, 
+    p_signer_name: userName, 
+    p_note: note 
+  });
+
+  if (error) throw error;
+  return data;
+},
 
   async getMyInbox(userId: string) {
     const { data, error } = await supabase.from("surat_signatures").select(`id, role_name, step_order, is_signed, surat_id, surat_registrasi!inner (*)`).eq("user_id", userId).eq("is_signed", false);

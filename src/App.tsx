@@ -25,8 +25,9 @@ const NotFound = lazy(() => import("@/pages/NotFound"));
 const SuratPage = lazy(() => import("@/pages/surat/SuratPage"));
 const InboxPage = lazy(() => import("@/pages/surat/InboxPage"));
 const MonitoringPage = lazy(() => import("@/pages/surat/MonitoringPage"));
+const PICMonitoringPage = lazy(() => import("@/pages/PIC/MonitoringPICPage"));
 
-// LAZY IMPORT - ADMIN MANAGEMENT (Dipindah ke lazy untuk mengecilkan bundle size)
+// LAZY IMPORT - ADMIN MANAGEMENT
 const UserManagementPage = lazy(() => import("@/pages/admin/UserManagementPage"));
 const DepartmentManagementPage = lazy(() => import("./pages/admin/DepartmentManagementPage"));
 const EntityManagementPage = lazy(() => import("./pages/admin/EntityManagementPage"));
@@ -47,7 +48,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Komponen Loading state saat Lazy Page dimuat
 const PageLoader = () => (
   <div className="h-screen w-full flex items-center justify-center bg-background">
     <div className="flex flex-col items-center gap-4">
@@ -63,17 +63,15 @@ const App = () => {
   const location = useLocation();
 
   useEffect(() => {
-    // Cek sesi saat aplikasi pertama kali dimuat
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setInitializing(false);
     });
 
-    // Listen perubahan auth (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (_event === 'SIGNED_OUT') {
-        queryClient.clear(); // Bersihkan cache data saat logout
+        queryClient.clear();
       }
     });
 
@@ -87,7 +85,6 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        {/* Realtime Provider hanya aktif jika sudah login */}
         {isAuth && <RealtimeSync />}
         
         <Toaster />
@@ -116,7 +113,10 @@ const App = () => {
               <Route path="/surat/inbox" element={<InboxPage />} />
               <Route path="/surat/monitoring" element={<MonitoringPage />} />
               
-              {/* ADMIN MODULE (Lazy Loaded) */}
+              {/* PIC MODULE */}
+              <Route path="/pic/monitoring" element={<PICMonitoringPage />} /> {/* <-- ROUTE BARU PIC */}
+              
+              {/* ADMIN MODULE */}
               <Route path="/admin/users" element={<UserManagementPage />} />
               <Route path="/admin/departments" element={<DepartmentManagementPage />} />
               <Route path="/admin/entities" element={<EntityManagementPage />} />
@@ -128,7 +128,6 @@ const App = () => {
               <Route path="/admin/monitoring" element={<AdminMonitoringPage />} />
             </Route>
 
-            {/* 404 ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
