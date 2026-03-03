@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { 
-  Download, FileUp, Hash, ArrowDown, Loader2, Briefcase, FileText, 
-  Check, ChevronDown, Paperclip, Copy, RefreshCcw
+  Download, FileUp, Hash, ArrowDown, Loader2, Briefcase, 
+  Check, ChevronDown, Paperclip, Copy, RefreshCcw, ChevronRight, Layers
 } from "lucide-react";
 import { suratService } from "@/services/surat.service";
 import { supabase } from "@/lib/supabase";
@@ -24,8 +24,6 @@ interface SuratFormProps {
 
 export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDisplay }: SuratFormProps) {
   const { toast } = useToast();
-  
-  // Refs untuk reset input file secara fisik
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lampiranInputRef = useRef<HTMLInputElement>(null);
 
@@ -56,10 +54,26 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
 
   const [signers, setSigners] = useState<any[]>([]);
 
-  // --- FUNGSI RESET FORM ---
+  const getFullRoles = (u: any) => {
+    return [
+      ...(u.membuat?.split(',') || []), 
+      ...(u.memeriksa ? u.memeriksa.split(',') : []), 
+      ...(u.menyetujui?.split(',') || [])
+    ].filter(Boolean).map(r => r.trim());
+  };
+
+  const groupedUsage = useMemo(() => {
+    const groups: { [key: number]: any[] } = {};
+    usageDetails.forEach(item => {
+      const level = getFullRoles(item).length;
+      if (!groups[level]) groups[level] = [];
+      groups[level].push(item);
+    });
+    return groups;
+  }, [usageDetails]);
+
   const resetForm = () => {
-    const pusat = master.offices.find((o: any) => o.kedudukan === 'Pusat');
-    
+    const pusat = master.offices?.find((o: any) => o.kedudukan === 'Pusat');
     setFormData({
       entity_id: "",
       dept_id: "",
@@ -70,37 +84,30 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
       penggunaan_id: "",
       is_aset: false
     });
-
     setGeneratedNoSurat(null);
     setSelectedUsage(null);
     setFile(null);
     setLampiranFile(null);
     setSigners([]);
     setJudulForDisplay("");
-    
-    // Reset nilai input file di DOM
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (lampiranInputRef.current) lampiranInputRef.current.value = "";
   };
 
-  // 1. Ambil Data Master
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
         const data = await suratService.getMasterData();
         setMaster(data);
-        const pusat = data.offices.find((o: any) => o.kedudukan === 'Pusat');
-        if (pusat) {
-          setFormData(prev => ({ ...prev, office_id: pusat.id }));
-        }
+        const pusat = data.offices?.find((o: any) => o.kedudukan === 'Pusat');
+        if (pusat) setFormData(prev => ({ ...prev, office_id: pusat.id }));
       } catch (error) {
-        console.error("Gagal memuat data master");
+        toast({ variant: "destructive", title: "Gagal memuat data master" });
       }
     };
     fetchInitialData();
-  }, []);
+  }, [toast]);
 
-  // 2. Ambil Matrix Penggunaan
   useEffect(() => {
     const fetchUsageGlobal = async () => {
       const { data, error } = await supabase
@@ -115,45 +122,51 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     fetchUsageGlobal();
   }, [toast]);
 
-  // 3. Auto-select Entity saat Proyek dipilih
+  // Sync Entity ID jika Project dipilih
   useEffect(() => {
     if (formData.project_id) {
-      const selectedProj = master.projects.find((p: any) => p.id === formData.project_id);
-      if (selectedProj?.entity_id) {
-        setFormData(prev => ({ ...prev, entity_id: selectedProj.entity_id }));
-      }
+      const selectedProj = master.projects?.find((p: any) => p.id === formData.project_id);
+      if (selectedProj?.entity_id) setFormData(prev => ({ ...prev, entity_id: selectedProj.entity_id }));
     }
   }, [formData.project_id, master.projects]);
 
-  // 4. Filter Logika Tampilan
-  const officePusat = useMemo(() => master.offices.find((o: any) => o.kedudukan === 'Pusat'), [master.offices]);
+  const officePusat = useMemo(() => master.offices?.find((o: any) => o.kedudukan === 'Pusat'), [master.offices]);
   const isPusatSelected = formData.office_id === officePusat?.id;
 
+  // FIX: Filter Departemen agar tidak hilang (Case-Insensitive & Space-Agnostic)
   const filteredDepts = useMemo(() => {
+    if (!master.depts) return [];
     return master.depts.filter((d: any) => {
-      const isCabangDept = d.name.toLowerCase().includes("(cabang)");
-      return !isPusatSelected ? isCabangDept : !isCabangDept;
-    });
+      const isCabangDept = / \(cabang\)/i.test(d.name) || d.name.toLowerCase().includes("(cabang)");
+      // Jika Pusat dipilih: ambil yang BUKAN cabang. Jika Cabang dipilih: ambil yang ADALAH cabang.
+      return isPusatSelected ? !isCabangDept : isCabangDept;
+    }).sort((a: any, b: any) => parseInt(a.dept_index) - parseInt(b.dept_index));
   }, [master.depts, isPusatSelected]);
 
   const filteredProjects = useMemo(() => {
-    if (isPusatSelected) return [];
+    if (isPusatSelected || !master.projects) return [];
     return master.projects.filter((p: any) => p.office_id === formData.office_id);
   }, [master.projects, formData.office_id, isPusatSelected]);
 
-  // 5. Handlers
-  const handleGetNumber = async () => {
-    if (!isPusatSelected && !formData.project_id) {
-      return toast({ variant: "destructive", title: "Proyek Belum Dipilih", description: "Silakan pilih proyek terlebih dahulu." });
+  const handleUsageChange = (val: string) => {
+    const detail = usageDetails.find(u => u.id === val);
+    if (detail) {
+      setSelectedUsage(detail);
+      setFormData(prev => ({ ...prev, penggunaan_id: val }));
+      const roles = getFullRoles(detail);
+      setSigners(roles.map((role, i) => ({ role_name: role, user_id: "", step_order: i + 1 })));
     }
-    
+  };
+
+  const handleGetNumber = async () => {
+    if (!isPusatSelected && !formData.project_id) return toast({ variant: "destructive", title: "Proyek Belum Dipilih" });
     setIsProcessingNumber(true);
     try {
       const res = await suratService.generateNoSurat(formData);
       setGeneratedNoSurat(res.fullNumber);
-      toast({ title: "Nomor Berhasil Didapatkan", description: `Nomor urut ${res.noUrut} siap digunakan.` });
+      toast({ title: "Nomor Berhasil Didapatkan" });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Gagal Mendapatkan Nomor", description: "Sistem tidak dapat menerbitkan nomor saat ini." });
+      toast({ variant: "destructive", title: "Gagal Mendapatkan Nomor" });
     } finally { setIsProcessingNumber(false); }
   };
 
@@ -161,24 +174,10 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     if (generatedNoSurat) {
       try {
         await suratService.cancelRegistration(generatedNoSurat);
-        // Kembali ke state awal nomor
         setGeneratedNoSurat(null);
-        setJudulForDisplay("");
-        toast({ description: "Nomor sebelumnya telah dibatalkan." });
       } catch (error) {
         toast({ variant: "destructive", title: "Gagal membatalkan nomor" });
       }
-    }
-  };
-
-  const handleUsageChange = (val: string) => {
-    const detail = usageDetails.find(u => u.id === val);
-    if (detail) {
-      setSelectedUsage(detail);
-      setFormData(prev => ({ ...prev, penggunaan_id: val }));
-      const parseRoles = (str: string) => str ? str.split(',').map(s => s.trim()).filter(s => s !== "") : [];
-      const combinedRoles = [...parseRoles(detail.membuat), ...parseRoles(detail.memeriksa), ...parseRoles(detail.menyetujui)];
-      setSigners(combinedRoles.map((role, i) => ({ role_name: role, user_id: "", step_order: i + 1 })));
     }
   };
 
@@ -186,7 +185,6 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     if (generatedNoSurat) {
       await navigator.clipboard.writeText(generatedNoSurat);
       setIsCopied(true);
-      toast({ title: "Berhasil Disalin" });
       setTimeout(() => setIsCopied(false), 2000);
     }
   };
@@ -203,30 +201,21 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
 
   const handleSubmit = async () => {
     if (!file) return toast({ variant: "destructive", title: "File Belum Diunggah" });
-    
+    if (selectedUsage?.lampiran_wajib && !lampiranFile) return toast({ variant: "destructive", title: "Lampiran Wajib Belum Ada" });
     setIsLoading(true);
     try {
       const payload = { ...formData, no_surat: generatedNoSurat };
       const result = await suratService.createRegistrasi(payload, signers, file, lampiranFile); 
-      
       if (result) {
-        toast({ title: "Pendaftaran Berhasil", description: "Halaman dikosongkan untuk input baru." });
-        
-        // Simpan referensi data sebelum direset untuk callback
+        toast({ title: "Pendaftaran Berhasil" });
         const savedNoSurat = result.no_surat;
         const savedJudul = formData.judul_surat;
-
-        // RESET FORM TOTAL
         resetForm();
-
-        // Jalankan callback sukses
         onSuccess(savedNoSurat, savedJudul);
       }
     } catch (error: any) {
       toast({ variant: "destructive", title: "Gagal Menyimpan", description: error.message });
-    } finally { 
-      setIsLoading(false); 
-    }
+    } finally { setIsLoading(false); }
   };
 
   return (
@@ -234,14 +223,14 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
       <CardHeader className="bg-gradient-to-r from-primary/10 via-transparent to-transparent border-b border-border/50">
         <CardTitle className="text-xl font-black flex items-center gap-3 tracking-tight uppercase">
           <div className="p-2.5 bg-primary/20 rounded-xl shadow-inner">
-            <FileText className="w-5 h-5 text-primary" />
+            <Layers className="w-5 h-5 text-primary" />
           </div>
           Registrasi Dokumen Digital
         </CardTitle>
       </CardHeader>
 
       <CardContent className="p-6 md:p-10 space-y-12">
-        {/* BAGIAN 1: IDENTITAS & NOMOR */}
+        {/* BAGIAN 1: IDENTITAS */}
         <section className="space-y-6">
           <div className="flex items-center gap-4">
             <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black shadow-lg">1</span>
@@ -254,7 +243,7 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
               <Select 
                 disabled={!!generatedNoSurat} 
                 value={formData.office_id} 
-                onValueChange={(v) => setFormData({...formData, office_id: v, project_id: "", dept_id: ""})}
+                onValueChange={(v) => setFormData({...formData, office_id: v, project_id: "", dept_id: "", entity_id: ""})}
               >
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border">
                   <SelectValue placeholder="Pilih Kantor..." />
@@ -291,7 +280,11 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
 
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase text-muted-foreground ml-1">Entitas (PT)</Label>
-              <Select disabled={!!generatedNoSurat} value={formData.entity_id} onValueChange={(v) => setFormData({...formData, entity_id: v})}>
+              <Select 
+                disabled={!!generatedNoSurat || (!!formData.project_id)} 
+                value={formData.entity_id} 
+                onValueChange={(v) => setFormData({...formData, entity_id: v})}
+              >
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border">
                   <SelectValue placeholder="Pilih PT..." />
                 </SelectTrigger>
@@ -339,7 +332,7 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
               <div className="flex gap-4 items-center">
                 <div className="p-3 bg-primary rounded-2xl text-primary-foreground shadow-lg"><Hash className="w-6 h-6" /></div>
                 <div>
-                  <p className="text-[10px] font-black text-primary uppercase tracking-widest">Nomor Telah Dialokasikan</p>
+                  <p className="text-[10px] font-black text-primary uppercase tracking-widest">Nomor Terdaftar</p>
                   <div className="flex items-center gap-3">
                     <p className="text-2xl font-black tracking-tighter">{generatedNoSurat}</p>
                     <Button variant="outline" size="icon" onClick={handleCopy} className="h-8 w-8 hover:bg-primary hover:text-white transition-colors">
@@ -349,47 +342,84 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                 </div>
               </div>
               <Button variant="outline" onClick={handleResetNumber} className="border-primary text-primary font-bold hover:bg-primary/5 rounded-xl">
-                <RefreshCcw className="w-4 h-4 mr-2" /> Ubah Data Kantor
+                <RefreshCcw className="w-4 h-4 mr-2" /> Ubah Identitas
               </Button>
             </div>
           )}
         </section>
 
-        {/* BAGIAN 2 & 3: DETAIL & PERSETUJUAN */}
+        {/* BAGIAN 2 & 3 */}
         {generatedNoSurat && (
           <div className="space-y-12 animate-in slide-in-from-bottom-5 duration-500">
             <section className="space-y-6">
               <div className="flex items-center gap-4">
                 <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black">2</span>
-                <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Isi Dokumen & Matrix</h3>
+                <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Persetujuan & Berkas</h3>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-6">
                   <div className="space-y-2">
-                    <Label className="text-[11px] font-black uppercase ml-1 text-muted-foreground">Pilih Alur Persetujuan (Matrix)</Label>
+                    <Label className="text-[11px] font-black uppercase ml-1 text-muted-foreground">Pilih Matrix Formasi</Label>
                     <Popover open={openMatrix} onOpenChange={setOpenMatrix}>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full h-12 justify-between rounded-xl ring-1 ring-border border-none bg-muted/20 text-left">
-                          <span className="truncate">{formData.penggunaan_id ? usageDetails.find(u => u.id === formData.penggunaan_id)?.penggunaan : "Cari Matrix..."}</span>
-                          <ChevronDown className="h-4 w-4 opacity-50" />
+                        <Button variant="outline" className="w-full h-auto py-3 justify-between rounded-xl ring-1 ring-border border-none bg-muted/20 text-left">
+                          <div className="flex flex-col gap-1 truncate">
+                            {selectedUsage ? (
+                                <div className="flex items-center gap-1 flex-wrap">
+                                    {getFullRoles(selectedUsage).map((role, idx, arr) => (
+                                        <React.Fragment key={idx}>
+                                            <span className="text-xs font-black uppercase">{role}</span>
+                                            {idx < arr.length - 1 && <ChevronRight className="w-3 h-3 opacity-30" />}
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            ) : (
+                                <span className="text-muted-foreground text-sm">Cari Alur Matrix...</span>
+                            )}
+                          </div>
+                          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
                         <Command>
-                          <CommandInput placeholder="Cari penggunaan..." />
-                          <CommandList>
-                            <CommandEmpty>Tidak ditemukan.</CommandEmpty>
-                            <CommandGroup>
-                              {usageDetails.map((u: any) => (
-                                <CommandItem key={u.id} onSelect={() => { handleUsageChange(u.id); setOpenMatrix(false); }}>
-                                  <div className="flex flex-col">
-                                    <span className="font-bold">{u.penggunaan}</span>
-                                    <span className="text-[9px] opacity-60 uppercase">{u.membuat} → {u.menyetujui}</span>
+                          <CommandInput placeholder="Cari formasi..." />
+                          <CommandList className="max-h-[300px]">
+                            <CommandEmpty>Matrix tidak ditemukan.</CommandEmpty>
+                            {Object.keys(groupedUsage).sort().map((level) => (
+                              <CommandGroup 
+                                key={level} 
+                                heading={
+                                  <div className="flex items-center gap-2 py-1">
+                                    <div className="flex gap-0.5">
+                                      {[...Array(parseInt(level))].map((_, i) => (
+                                        <div key={i} className="w-2.5 h-2.5 bg-primary/60 rounded-sm" />
+                                      ))}
+                                    </div>
+                                    <span className="text-xs font-black text-primary uppercase tracking-widest">LEVEL {level}</span>
                                   </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
+                                }
+                              >
+                                {groupedUsage[parseInt(level)].map((u: any) => (
+                                  <CommandItem 
+                                    key={u.id} 
+                                    onSelect={() => { handleUsageChange(u.id); setOpenMatrix(false); }}
+                                    className="p-3 cursor-pointer border-b border-border/30 last:border-none"
+                                  >
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {getFullRoles(u).map((role, idx, arr) => (
+                                        <React.Fragment key={idx}>
+                                          <span className="text-[10px] px-2 py-0.5 bg-muted text-muted-foreground rounded-md font-black uppercase border border-border/50">
+                                            {role}
+                                          </span>
+                                          {idx < arr.length - 1 && <ChevronRight className="w-3 h-3 text-muted-foreground/30" />}
+                                        </React.Fragment>
+                                      ))}
+                                    </div>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            ))}
                           </CommandList>
                         </Command>
                       </PopoverContent>
@@ -400,9 +430,12 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                     <Label className="text-[11px] font-black uppercase ml-1 text-muted-foreground">Perihal (Judul Surat)</Label>
                     <Input 
                       className="h-12 rounded-xl ring-1 ring-border border-none bg-muted/20 focus-visible:ring-primary" 
-                      placeholder="Contoh: Permohonan Pembelian..." 
+                      placeholder="Input perihal dokumen..." 
                       value={formData.judul_surat} 
-                      onChange={(e) => { setFormData({...formData, judul_surat: e.target.value}); setJudulForDisplay(e.target.value); }} 
+                      onChange={(e) => { 
+                        setFormData({...formData, judul_surat: e.target.value}); 
+                        setJudulForDisplay(e.target.value); 
+                      }} 
                     />
                   </div>
 
@@ -414,7 +447,7 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                       disabled={isDownloading}
                     >
                       {isDownloading ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
-                      UNDUH TEMPLATE OTOMATIS
+                      UNDUH TEMPLATE
                     </Button>
                   )}
                 </div>
@@ -424,32 +457,18 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                     "relative group border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center transition-all min-h-[160px]",
                     file ? "border-primary bg-primary/5" : "border-muted-foreground/20 bg-muted/10"
                   )}>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef}
-                      accept=".xlsx" 
-                      className="absolute inset-0 opacity-0 cursor-pointer z-10" 
-                      onChange={(e) => setFile(e.target.files?.[0] || null)} 
-                    />
+                    <input type="file" ref={fileInputRef} accept=".xlsx" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => setFile(e.target.files?.[0] || null)} />
                     <div className={cn("p-4 rounded-2xl mb-2", file ? "bg-primary text-white" : "bg-background text-muted-foreground")}><FileUp className="w-6 h-6" /></div>
-                    <p className="font-black text-xs text-center">{file ? file.name : "Unggah Dokumen Excel (.xlsx)"}</p>
+                    <p className="font-black text-xs text-center">{file ? file.name : "Unggah Excel (.xlsx)"}</p>
                   </div>
 
                   {selectedUsage?.lampiran_wajib && (
-                    <div className={cn(
-                      "relative border-2 border-dashed rounded-2xl p-5 flex items-center gap-4",
-                      lampiranFile ? "border-amber-500 bg-amber-500/5" : "border-destructive/40 bg-destructive/5"
-                    )}>
-                      <input 
-                        type="file" 
-                        ref={lampiranInputRef}
-                        className="absolute inset-0 opacity-0 cursor-pointer z-10" 
-                        onChange={(e) => setLampiranFile(e.target.files?.[0] || null)} 
-                      />
+                    <div className={cn("relative border-2 border-dashed rounded-2xl p-5 flex items-center gap-4", lampiranFile ? "border-amber-500 bg-amber-500/5" : "border-destructive/40 bg-destructive/5")}>
+                      <input type="file" ref={lampiranInputRef} className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => setLampiranFile(e.target.files?.[0] || null)} />
                       <div className={cn("p-3 rounded-xl", lampiranFile ? "bg-amber-500 text-white" : "bg-destructive text-white")}><Paperclip className="w-5 h-5" /></div>
                       <div className="text-left">
-                        <p className="text-[10px] font-black uppercase text-muted-foreground">Lampiran Wajib: {selectedUsage.lampiran_wajib}</p>
-                        <p className="text-xs font-bold truncate">{lampiranFile ? lampiranFile.name : "Klik untuk unggah lampiran"}</p>
+                        <p className="text-[10px] font-black uppercase text-muted-foreground">Wajib: {selectedUsage.lampiran_wajib}</p>
+                        <p className="text-xs font-bold truncate">{lampiranFile ? lampiranFile.name : "Unggah Lampiran"}</p>
                       </div>
                     </div>
                   )}
@@ -458,25 +477,25 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
             </section>
 
             {signers.length > 0 && file && (
-              <section className="space-y-8 pt-6 border-t border-border/50">
+              <section className="space-y-8 pt-6 border-t border-border/50 animate-in fade-in slide-in-from-top-4">
                 <div className="flex items-center gap-4">
                   <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black">3</span>
-                  <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Pejabat Penandatangan</h3>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Penetapan Pejabat</h3>
                 </div>
                 <div className="max-w-xl mx-auto space-y-4">
                   {signers.map((s, i) => (
                     <div key={i} className="flex flex-col items-center">
                       <div className="w-full p-5 rounded-2xl bg-card border border-border flex items-center gap-5">
                         <div className="flex flex-col items-center justify-center w-10 h-10 rounded-xl bg-muted font-black text-[10px] shrink-0">
-                          <span className="opacity-50 text-[7px]">URUTAN</span>{s.step_order}
+                          <span className="opacity-50 text-[7px]">KE</span>{s.step_order}
                         </div>
                         <div className="flex-1 text-left space-y-1">
                           <p className="text-[10px] font-black text-primary uppercase">{s.role_name}</p>
                           <Select value={s.user_id} onValueChange={(val) => {
-                            const newS = [...signers];
-                            newS[i].user_id = val;
-                            setSigners(newS);
-                          }}>
+                              const newS = [...signers];
+                              newS[i].user_id = val;
+                              setSigners(newS);
+                            }}>
                             <SelectTrigger className="h-10 bg-muted/20 border-none ring-1 ring-border rounded-lg">
                               <SelectValue placeholder="Pilih Pejabat..." />
                             </SelectTrigger>
@@ -491,11 +510,11 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                   ))}
                 </div>
                 <Button 
-                  className="w-full h-16 bg-primary text-white text-lg font-black rounded-3xl shadow-2xl mt-6 transition-transform active:scale-95" 
-                  disabled={isLoading || signers.some(s => !s.user_id) || !formData.judul_surat || (!!selectedUsage?.lampiran_wajib && !lampiranFile)}
+                  className="w-full h-16 bg-primary text-white text-lg font-black rounded-3xl shadow-2xl mt-6 transition-all active:scale-95" 
+                  disabled={isLoading || signers.some(s => !s.user_id) || !formData.judul_surat}
                   onClick={handleSubmit}
                 >
-                  {isLoading ? <Loader2 className="animate-spin w-6 h-6 mr-3" /> : "KONFIRMASI & SIMPAN DOKUMEN"}
+                  {isLoading ? <Loader2 className="animate-spin w-6 h-6" /> : "KONFIRMASI PENDAFTARAN"}
                 </Button>
               </section>
             )}

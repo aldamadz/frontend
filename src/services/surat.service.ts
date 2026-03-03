@@ -257,57 +257,80 @@ export const suratService = {
     return publicUrl;
   },
 
-async approveSurat(signatureId: string, suratId: string, currentStep: number, userName: string, note: string = "") {
-  // 1. Ambil info signature dan surat
-  const { data: sigInfo } = await supabase
-    .from("surat_signatures")
-    .select(`role_name, surat_registrasi (file_path, penggunaan_id)`)
-    .eq("id", signatureId)
-    .single();
+  async approveSurat(signatureId: string, suratId: string, currentStep: number, userName: string, note: string = "") {
+    const { data: sigInfo } = await supabase
+      .from("surat_signatures")
+      .select(`role_name, surat_registrasi (file_path, penggunaan_id)`)
+      .eq("id", signatureId)
+      .single();
 
-  const suratData = Array.isArray(sigInfo?.surat_registrasi) 
-    ? sigInfo?.surat_registrasi[0] 
-    : sigInfo?.surat_registrasi;
+    const suratData = Array.isArray(sigInfo?.surat_registrasi) 
+      ? sigInfo?.surat_registrasi[0] 
+      : sigInfo?.surat_registrasi;
 
-  let finalUrl = suratData?.file_path;
+    let finalUrl = suratData?.file_path;
 
-  // 2. Jika file adalah Excel, lakukan proses stempel (menghasilkan file baru)
-  if (suratData?.file_path?.toLowerCase().includes(".xlsx") && suratData?.penggunaan_id) {
-    finalUrl = await this.stampApprovalExcel(
-      suratId, 
-      suratData.file_path, 
-      userName, 
-      sigInfo!.role_name, 
-      suratData.penggunaan_id
-    );
-  }
+    if (suratData?.file_path?.toLowerCase().includes(".xlsx") && suratData?.penggunaan_id) {
+      finalUrl = await this.stampApprovalExcel(
+        suratId, 
+        suratData.file_path, 
+        userName, 
+        sigInfo!.role_name, 
+        suratData.penggunaan_id
+      );
+    }
 
-  // 3. Update signature: set is_signed dan simpan LINK SNAPSHOT file versi ini
-  const { error: updateSigError } = await supabase
-    .from("surat_signatures")
-    .update({ 
-      is_signed: true,
-      signed_at: new Date().toISOString(),
-      file_path_snap: finalUrl, // <--- LINK DISIMPAN DI SINI
-      catatan: note,
-      status: 'SUCCESS'
-    })
-    .eq("id", signatureId);
+    const { error: updateSigError } = await supabase
+      .from("surat_signatures")
+      .update({ 
+        is_signed: true,
+        signed_at: new Date().toISOString(),
+        file_path_snap: finalUrl,
+        catatan: note,
+        status: 'SUCCESS'
+      })
+      .eq("id", signatureId);
 
-  if (updateSigError) throw updateSigError;
+    if (updateSigError) throw updateSigError;
 
-  // 4. Lanjutkan ke RPC handle_approve_surat untuk menaikkan step_order di tabel utama
-  const { data, error } = await supabase.rpc('handle_approve_surat', { 
-    p_sig_id: signatureId, 
-    p_surat_id: suratId, 
-    p_current_step: currentStep, 
-    p_signer_name: userName, 
-    p_note: note 
-  });
+    const { data, error } = await supabase.rpc('handle_approve_surat', { 
+      p_sig_id: signatureId, 
+      p_surat_id: suratId, 
+      p_current_step: currentStep, 
+      p_signer_name: userName, 
+      p_note: note 
+    });
 
-  if (error) throw error;
-  return data;
-},
+    if (error) throw error;
+    return data;
+  },
+
+  // FUNGSI UNTUK REJECT SURAT (MEMPERBAIKI ERROR TS)
+  async rejectSurat(signatureId: string, suratId: string, note: string) {
+    // Update status di signature
+    const { error: sigError } = await supabase
+      .from("surat_signatures")
+      .update({
+        is_signed: true, // Dianggap selesai memproses (tapi reject)
+        signed_at: new Date().toISOString(),
+        catatan: note,
+        status: 'REJECTED'
+      })
+      .eq("id", signatureId);
+
+    if (sigError) throw sigError;
+
+    // Update status di tabel utama surat_registrasi
+    const { error: suratError } = await supabase
+      .from("surat_registrasi")
+      .update({
+        status: 'REJECTED'
+      })
+      .eq("id", suratId);
+
+    if (suratError) throw suratError;
+    return true;
+  },
 
   async getMyInbox(userId: string) {
     const { data, error } = await supabase.from("surat_signatures").select(`id, role_name, step_order, is_signed, surat_id, surat_registrasi!inner (*)`).eq("user_id", userId).eq("is_signed", false);
@@ -376,6 +399,7 @@ async approveSurat(signatureId: string, suratId: string, currentStep: number, us
   },
 
   getPreviewUrl(publicUrl: string) {
-    return publicUrl ? `https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true` : "";
+    // Menggunakan officeapps.live.com (Microsoft Office Viewer) seringkali lebih stabil untuk .xlsx
+    return publicUrl ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : "";
   }
 };

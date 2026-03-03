@@ -1,6 +1,5 @@
-import { Bell, Search, Plus, Clock, FileCheck, Inbox, CheckCheck, Trash2, AlertCircle } from 'lucide-react'
+import { Bell, Plus, Clock, FileCheck, Inbox, CheckCheck, Trash2, AlertCircle, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -8,14 +7,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { formatDistanceToNow } from 'date-fns'
 import { id as localeID } from 'date-fns/locale'
 import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 
 interface Notification {
   id: string
   title: string
   description: string
-  type: 'incoming' | 'stamped' | 'completed' | 'rejected'
+  type: 'incoming' | 'stamped' | 'completed' | 'rejected' | 'feedback'
   time: Date
   isRead: boolean
+  url?: string 
 }
 
 export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtitle?: string; onNewAgenda?: () => void }) => {
@@ -23,24 +24,32 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
   const unreadCount = notifications.filter(n => !n.isRead).length
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
-  // Helper untuk menambah notifikasi
+  // 1. Fungsi Tambah Notifikasi
   const addNotif = useCallback((n: Notification) => {
     setNotifications(prev => {
-      // Cegah duplikasi notifikasi dengan ID yang sama
       if (prev.find(item => item.id === n.id)) return prev;
       
-      // Mainkan suara notif.wav
       if (audioRef.current) {
-        audioRef.current.currentTime = 0; // Reset ke awal jika suara sedang main
-        audioRef.current.play().catch((err) => console.log("Audio play blocked by browser:", err));
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch((err) => console.log("Audio blocked:", err));
       }
       
       return [n, ...prev].slice(0, 50);
     });
   }, []);
 
-  // 1. Inisialisasi Audio Lokal & LocalStorage
+  // 2. Fungsi Klik Notifikasi (Navigasi ke halaman yang ADA)
+  const handleNotifClick = (n: Notification) => {
+    setNotifications(prev => prev.map(item => item.id === n.id ? {...item, isRead: true} : item));
+    
+    if (n.url) {
+      navigate(n.url);
+    }
+  };
+
+  // 3. Setup Audio & Storage
   useEffect(() => {
     const saved = localStorage.getItem('surat_notifs')
     if (saved) {
@@ -50,19 +59,17 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
       } catch (e) { console.error("Load fail", e) }
     }
 
-    // Menggunakan file lokal notif.wav di folder public/sounds/
     const audio = new Audio('/sounds/notif.WAV');
     audio.preload = 'auto';
-    audio.volume = 0.6; // Sesuaikan volume (0.0 - 1.0)
+    audio.volume = 0.6;
     audioRef.current = audio;
   }, [])
 
-  // 2. Auto-save ke LocalStorage
   useEffect(() => {
     localStorage.setItem('surat_notifs', JSON.stringify(notifications))
   }, [notifications])
 
-// 3. REALTIME LOGIC (FIXED FOR STEP 1)
+  // 4. REALTIME LOGIC
   useEffect(() => {
     let channel: any;
 
@@ -86,13 +93,11 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
             const isNew = payload.eventType === 'INSERT';
             const isStepUpdate = payload.eventType === 'UPDATE' && oldData && newData.current_step !== oldData.current_step;
 
+            // A. NOTIF UNTUK PENANDATANGAN (Ke halaman Inbox)
             if (isNew || isStepUpdate) {
-              // KHUSUS INSERT: Tunggu 1 detik agar data di surat_signatures selesai di-insert oleh sistem
-              if (isNew) {
-                await new Promise(resolve => setTimeout(resolve, 1200));
-              }
+              if (isNew) await new Promise(resolve => setTimeout(resolve, 1200));
 
-              const { data: myTurn, error: queryError } = await supabase
+              const { data: myTurn } = await supabase
                 .from('surat_signatures')
                 .select('id, role_name')
                 .eq('surat_id', newData.id)
@@ -100,35 +105,49 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
                 .eq('step_order', Number(newData.current_step))
                 .maybeSingle();
 
-              if (queryError) console.error("Query Error:", queryError);
-
               if (myTurn) {
                 addNotif({
                   id: `in-${newData.id}-${newData.current_step}`,
                   title: 'Permintaan Stamp Baru',
-                  description: `Surat "${newData.judul_surat}" menunggu verifikasi Anda sebagai ${myTurn.role_name}.`,
+                  description: `Surat "${newData.judul_surat}" menunggu verifikasi Anda.`,
                   type: 'incoming',
                   time: new Date(),
-                  isRead: false
+                  isRead: false,
+                  url: '/surat/inbox' // Diarahkan ke list inbox (pasti ada)
                 });
                 queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
               }
             }
 
-            // B. LOGIKA UNTUK PEMBUAT (NOTIF PROGRES)
+            // B. LOGIKA UNTUK PEMBUAT (Ke halaman Monitoring)
             if (newData.created_by === currentUser.id && payload.eventType === 'UPDATE' && oldData) {
-               // ... (Logika status REJECTED, SELESAI, STAMPED tetap sama seperti sebelumnya)
-               if (newData.status === 'REJECTED' && oldData.status !== 'REJECTED') {
-                addNotif({ id: `rej-${newData.id}-${Date.now()}`, title: 'Dokumen Ditolak', description: `Surat "${newData.judul_surat}" telah ditolak.`, type: 'rejected', time: new Date(), isRead: false });
-              } else if (newData.status === 'SELESAI' && oldData.status !== 'SELESAI') {
-                addNotif({ id: `done-${newData.id}`, title: 'Dokumen Selesai!', description: `Surat "${newData.judul_surat}" telah disetujui sepenuhnya.`, type: 'completed', time: new Date(), isRead: false });
-              } else if (Number(newData.current_step) > Number(oldData.current_step)) {
-                addNotif({ id: `step-${newData.id}-${newData.current_step}`, title: 'Update Progres', description: `Surat "${newData.judul_surat}" disetujui pada Step ${oldData.current_step}.`, type: 'stamped', time: new Date(), isRead: false });
+              
+              // 1. Notif Feedback PIC
+              if (newData.pic_feedback && newData.pic_feedback !== oldData.pic_feedback) {
+                addNotif({
+                  id: `fb-${newData.id}-${Date.now()}`,
+                  title: 'Feedback PIC Baru',
+                  description: `Catatan PIC: ${newData.pic_feedback}`,
+                  type: 'feedback',
+                  time: new Date(),
+                  isRead: false,
+                  url: '/surat/monitoring' // Diarahkan ke monitoring (pasti ada)
+                });
               }
+
+              // 2. Notif Status Dokumen
+              if (newData.status === 'REJECTED' && oldData.status !== 'REJECTED') {
+                addNotif({ id: `rej-${newData.id}-${Date.now()}`, title: 'Dokumen Ditolak', description: `Surat "${newData.judul_surat}" ditolak.`, type: 'rejected', time: new Date(), isRead: false, url: '/surat/monitoring' });
+              } else if (newData.status === 'SELESAI' && oldData.status !== 'SELESAI') {
+                addNotif({ id: `done-${newData.id}`, title: 'Dokumen Selesai!', description: `Surat "${newData.judul_surat}" disetujui sepenuhnya.`, type: 'completed', time: new Date(), isRead: false, url: '/surat/monitoring' });
+              } else if (Number(newData.current_step) > Number(oldData.current_step)) {
+                addNotif({ id: `step-${newData.id}-${newData.current_step}`, title: 'Update Progres', description: `Surat "${newData.judul_surat}" naik ke Step ${newData.current_step}.`, type: 'stamped', time: new Date(), isRead: false, url: '/surat/monitoring' });
+              }
+              
               queryClient.invalidateQueries({ queryKey: ['surat-list'] });
             }
           } catch (err) {
-            console.error("Notification Processing Error:", err);
+            console.error("Notif Error:", err);
           }
         })
         .subscribe();
@@ -178,9 +197,9 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
                 notifications.map((n) => (
                   <div 
                     key={n.id} 
-                    onClick={() => setNotifications(prev => prev.map(item => item.id === n.id ? {...item, isRead: true} : item))}
+                    onClick={() => handleNotifClick(n)}
                     className={cn(
-                      "p-4 border-b border-border/40 flex gap-3 cursor-pointer transition-all",
+                      "p-4 border-b border-border/40 flex gap-3 cursor-pointer transition-all hover:bg-muted/30",
                       !n.isRead ? "bg-primary/[0.03]" : "opacity-60"
                     )}
                   >
@@ -188,19 +207,24 @@ export const Header = ({ title, subtitle, onNewAgenda }: { title: string; subtit
                       "p-2 rounded-lg h-fit",
                       n.type === 'incoming' ? "bg-blue-500/10 text-blue-600" : 
                       n.type === 'rejected' ? "bg-red-500/10 text-red-600" :
-                      n.type === 'stamped' ? "bg-amber-500/10 text-amber-600" : "bg-emerald-500/10 text-emerald-600"
+                      n.type === 'stamped' ? "bg-amber-500/10 text-amber-600" :
+                      n.type === 'feedback' ? "bg-purple-500/10 text-purple-600" : 
+                      "bg-emerald-500/10 text-emerald-600"
                     )}>
                       {n.type === 'incoming' && <Inbox className="w-4 h-4" />}
                       {n.type === 'rejected' && <AlertCircle className="w-4 h-4" />}
                       {n.type === 'stamped' && <Clock className="w-4 h-4" />}
+                      {n.type === 'feedback' && <MessageSquare className="w-4 h-4" />}
                       {n.type === 'completed' && <FileCheck className="w-4 h-4" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-black leading-tight mb-1 uppercase tracking-tighter">{n.title}</p>
                       <p className="text-[10px] text-muted-foreground leading-snug line-clamp-2">{n.description}</p>
-                      <p className="text-[8px] text-muted-foreground/50 mt-2 font-bold uppercase">
-                        {formatDistanceToNow(n.time, { addSuffix: true, locale: localeID })}
-                      </p>
+                      <div className="flex items-center justify-between mt-2">
+                        <p className="text-[8px] text-muted-foreground/50 font-bold uppercase">
+                          {formatDistanceToNow(n.time, { addSuffix: true, locale: localeID })}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))

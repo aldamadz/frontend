@@ -305,8 +305,8 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
                     {renderNavLink('/admin/forms', 'Master Form', FileSignature, true)}
                     {renderNavLink('/admin/letter-types', 'Master Jenis Surat', Tag, true)}
                     {renderNavLink('/admin/offices', 'Master Kantor Cabang', MapPin, true)}
-                    {renderNavLink('/admin/workflow-details', 'Workflow Matrix', GitMerge, true)}
                     {renderNavLink('/admin/master-projects', 'Master Proyek', Briefcase, true)}
+                    {renderNavLink('/admin/workflow-details', 'Matriks Tanda Tangan', GitMerge, true)}
                   </motion.div>
                 )}
               </AnimatePresence>

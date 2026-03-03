@@ -11,14 +11,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { 
-  GitMerge, Plus, Pencil, Loader2, 
-  Settings2, X, Database, Trash2
+  Plus, Pencil, Loader2, Settings2, X, Database, 
+  Trash2, ChevronRight, Layers, Building2, Globe
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface TTDConfig {
+  roleName: string; 
   labelJabatan: string; 
-  roleName: string;     
   ttd: string;          
   nama: string;         
   jabatan: string;      
@@ -32,28 +32,27 @@ export default function WorkflowDetailManagementPage() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'pusat' | 'cabang'>('all');
 
   const [formData, setFormData] = useState({
-    penggunaan: "",
-    status_level: "1",
     membuat: "",
     memeriksa: "",
     menyetujui: "",
-    lampiran_wajib: "",
     form_id: "",
+    is_cabang: false,
     ttd_config: [] as TTDConfig[]
   });
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const { data: formsData } = await supabase.from("master_forms").select("id, nama_form, nomor_form");
+      const { data: formsData } = await supabase.from("master_forms").select("id, nama_form");
       setMasterForms(formsData || []);
 
       const { data: workflowData, error } = await supabase
         .from("master_penggunaan_detail")
-        .select(`*, master_forms!master_penggunaan_detail_form_id_fkey (nama_form, nomor_form)`)
-        .order("penggunaan", { ascending: true });
+        .select(`*, master_forms!master_penggunaan_detail_form_id_fkey (nama_form)`)
+        .order("created_at", { ascending: false }); // Menggunakan created_at sebagai ganti level
 
       if (error) throw error;
       setDetails(workflowData || []);
@@ -64,157 +63,156 @@ export default function WorkflowDetailManagementPage() {
 
   useEffect(() => { loadData(); }, []);
 
-  // Helper untuk membersihkan input teks dengan koma
-  const cleanCommaInput = (val: string) => {
-    return val.split(',').map(s => s.trim()).filter(s => s !== "").join(', ');
-  };
+  const filteredDetails = details.filter(item => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'cabang') return item.is_cabang === true;
+    return item.is_cabang === false || item.is_cabang === null;
+  });
+
+  const cleanCommaInput = (val: string) => val.split(',').map(s => s.trim()).filter(s => s !== "").join(', ');
 
   const handleOpenModal = (item: any = null) => {
     if (item) {
       setSelectedItem(item);
       setFormData({ 
-        penggunaan: item.penggunaan || "",
-        status_level: item.status_level?.toString() || "1",
         membuat: item.membuat || "",
         memeriksa: item.memeriksa || "",
         menyetujui: item.menyetujui || "",
-        lampiran_wajib: item.lampiran_wajib || "",
         form_id: item.form_id || "",
+        is_cabang: item.is_cabang || false,
         ttd_config: Array.isArray(item.ttd_config) ? item.ttd_config : [] 
       });
     } else {
       setSelectedItem(null);
       setFormData({
-        penggunaan: "", status_level: "1", membuat: "", memeriksa: "", menyetujui: "",
-        lampiran_wajib: "", form_id: masterForms[0]?.id || "",
+        membuat: "", memeriksa: "", menyetujui: "",
+        form_id: masterForms[0]?.id || "",
+        is_cabang: false,
         ttd_config: []
       });
     }
     setIsModalOpen(true);
   };
 
-  const addTTDMapping = (labelInput: string) => {
-    if (!labelInput) {
-      toast({ variant: "destructive", title: "Peringatan", description: "Isi nama jabatan terlebih dahulu" });
-      return;
-    }
-
-    // Split jika ada koma (mendukung input banyak orang sekaligus)
+  const addTTDMapping = (roleKey: string, labelInput: string) => {
+    if (!labelInput) return;
     const labels = labelInput.split(',').map(s => s.trim()).filter(s => s !== "");
-    
     const newConfigs = labels.map(label => ({
-      labelJabatan: label,
-      roleName: label,
-      ttd: "",
-      nama: "",
-      jabatan: "",
-      sheet: 1
+      roleName: roleKey, labelJabatan: label, ttd: "", nama: "", jabatan: "", sheet: 1
     }));
-
-    // Cek duplikasi agar tidak double mapping
-    const filteredNewConfigs = newConfigs.filter(
-      newCfg => !formData.ttd_config.some(existing => existing.labelJabatan === newCfg.labelJabatan)
-    );
-
-    setFormData({
-      ...formData,
-      ttd_config: [...formData.ttd_config, ...filteredNewConfigs]
-    });
+    const uniqueConfigs = newConfigs.filter(n => !formData.ttd_config.some(e => e.roleName === n.roleName && e.labelJabatan === n.labelJabatan));
+    setFormData({ ...formData, ttd_config: [...formData.ttd_config, ...uniqueConfigs] });
   };
 
   const handleSave = async () => {
     try {
       setLoading(true);
-      // Bersihkan format teks sebelum simpan (Pastikan format "Nama, Nama")
       const payload = {
-        penggunaan: formData.penggunaan,
-        status_level: parseInt(formData.status_level),
         membuat: cleanCommaInput(formData.membuat),
         memeriksa: cleanCommaInput(formData.memeriksa),
         menyetujui: cleanCommaInput(formData.menyetujui),
-        lampiran_wajib: formData.lampiran_wajib,
         form_id: formData.form_id,
+        is_cabang: formData.is_cabang,
         ttd_config: formData.ttd_config
       };
-
+      
       const { error } = selectedItem 
         ? await supabase.from("master_penggunaan_detail").update(payload).eq("id", selectedItem.id)
         : await supabase.from("master_penggunaan_detail").insert([payload]);
 
       if (error) throw error;
-
-      toast({ title: "Berhasil", description: "Matriks stamp digital telah diperbarui" });
+      toast({ title: "Success", description: "Workflow configuration saved." });
       setIsModalOpen(false);
       loadData();
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Gagal", description: error.message });
+      toast({ variant: "destructive", title: "Error", description: error.message });
     } finally { setLoading(false); }
   };
 
   return (
-    <div className="p-8 space-y-6 max-w-[1600px] mx-auto min-h-screen bg-background text-foreground">
-      {/* HEADER */}
-      <div className="flex justify-between items-center border-b pb-6">
+    <div className="p-8 max-w-[1600px] mx-auto min-h-screen space-y-8">
+      {/* Header Section */}
+      <div className="flex justify-between items-center border-b border-border pb-8">
         <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-3">
-            <GitMerge className="text-primary h-6 w-6"/> STAMP DIGITAL ENGINE
+          <h1 className="text-2xl font-extrabold tracking-tight flex items-center gap-3 text-gradient uppercase">
+            <Layers className="text-primary h-6 w-6"/> Stamp Engine v4.0
           </h1>
-          <p className="text-xs text-muted-foreground uppercase tracking-widest mt-1">Workflow & Coordinate Mapping</p>
+          <div className="flex items-center gap-2 mt-2">
+            <div className="flex bg-muted rounded-lg p-1 border border-border">
+              {(['all', 'pusat', 'cabang'] as const).map((f) => (
+                <button 
+                  key={f} 
+                  onClick={() => setActiveFilter(f)} 
+                  className={`px-4 py-1 text-[10px] font-bold uppercase rounded-md transition-all ${activeFilter === f ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <Button onClick={() => handleOpenModal()} className="font-bold shadow-sm">
-            <Plus className="mr-2 h-4 w-4"/> TAMBAH MATRIKS
+        <Button onClick={() => handleOpenModal()} className="font-bold px-6 h-11 glow-effect">
+          <Plus className="mr-2 h-4 w-4"/> NEW MATRIX
         </Button>
       </div>
 
-      {/* TABLE */}
-      <div className="rounded-xl border bg-card overflow-hidden">
+      {/* Table Section */}
+      <div className="elevated-card rounded-xl overflow-hidden">
         <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50">
-              <TableHead className="w-16 text-center font-bold">LVL</TableHead>
-              <TableHead className="font-bold">DETAIL PENGGUNAAN</TableHead>
-              <TableHead className="font-bold">MAPPING ROLES</TableHead>
-              <TableHead className="text-right font-bold px-6">AKSI</TableHead>
+          <TableHeader className="bg-muted/30">
+            <TableRow className="hover:bg-transparent border-b border-border">
+              <TableHead className="w-32 text-center font-bold text-xs">SCOPE</TableHead>
+              <TableHead className="font-bold text-xs uppercase">Workflow Sequence</TableHead>
+              <TableHead className="font-bold text-xs uppercase">Coordinate Matrix Mapping</TableHead>
+              <TableHead className="text-right px-8 font-bold text-xs uppercase">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && details.length === 0 ? (
-                <TableRow>
-                    <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
-                        <Loader2 className="animate-spin inline mr-2 h-4 w-4" /> Sinkronisasi data...
-                    </TableCell>
-                </TableRow>
-            ) : details.map((item) => (
-              <TableRow key={item.id} className="hover:bg-muted/30 transition-colors">
-                <TableCell className="text-center font-bold text-primary">{item.status_level}</TableCell>
-                <TableCell>
-                  <div className="font-bold">{item.penggunaan}</div>
-                  <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
-                    <Database className="h-3 w-3" /> {item.master_forms?.nama_form || 'No Form'}
+              <TableRow>
+                <TableCell colSpan={4} className="h-48 text-center">
+                  <Loader2 className="animate-spin h-6 w-6 mx-auto text-primary" />
+                </TableCell>
+              </TableRow>
+            ) : filteredDetails.map((item) => (
+              <TableRow key={item.id} className="border-b border-border/50 transition-colors hover:bg-muted/10">
+                <TableCell className="text-center">
+                  <Badge className={`px-3 py-1 text-[10px] font-bold ${item.is_cabang ? 'bg-orange-500/10 text-orange-500 border-orange-500/20' : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>
+                    {item.is_cabang ? 'CABANG' : 'PUSAT'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="py-6">
+                  <div className="flex items-center gap-2 flex-wrap mb-3">
+                    <Badge variant="secondary" className="text-[10px] font-bold uppercase border-l-2 border-l-green-500">M: {item.membuat}</Badge>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    <Badge variant="secondary" className="text-[10px] font-bold uppercase border-l-2 border-l-yellow-500">C: {item.memeriksa}</Badge>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    <Badge variant="secondary" className="text-[10px] font-bold uppercase border-l-2 border-l-red-500">A: {item.menyetujui}</Badge>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                    <Database className="h-3 w-3" /> {item.master_forms?.nama_form}
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-2">
                     {item.ttd_config?.map((t: any, i: number) => (
-                      <Badge key={i} variant="outline" className="text-[9px] font-semibold py-0">
-                        {t.labelJabatan} → {t.ttd}
-                      </Badge>
+                      <div key={i} className="bg-muted border border-border p-2 rounded text-[10px] min-w-[100px]">
+                        <p className="font-extrabold text-primary uppercase leading-tight">{t.roleName}</p>
+                        <p className="font-medium text-foreground truncate">{t.labelJabatan}</p>
+                        <p className="font-mono text-warning mt-1">{t.ttd || 'N/A'}</p>
+                      </div>
                     ))}
                   </div>
                 </TableCell>
-                <TableCell className="text-right px-6">
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleOpenModal(item)}>
-                        <Pencil className="h-4 w-4 text-muted-foreground"/>
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-destructive" onClick={() => {
-                        if(confirm("Hapus matriks ini?")) {
-                          supabase.from("master_penggunaan_detail").delete().eq("id", item.id).then(() => loadData());
-                        }
-                    }}>
-                        <Trash2 className="h-4 w-4"/>
-                    </Button>
-                  </div>
+                <TableCell className="text-right px-8 space-x-2">
+                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleOpenModal(item)}>
+                    <Pencil className="h-3.5 w-3.5"/>
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8 text-destructive border-destructive/20 hover:bg-destructive/10" onClick={() => {
+                    if(confirm("Confirm delete?")) supabase.from("master_penggunaan_detail").delete().eq("id", item.id).then(() => loadData());
+                  }}>
+                    <Trash2 className="h-3.5 w-3.5"/>
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -222,103 +220,104 @@ export default function WorkflowDetailManagementPage() {
         </Table>
       </div>
 
+      {/* Modal Section */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-7xl p-0 h-[85vh] flex flex-col overflow-hidden">
-          <DialogHeader className="p-6 border-b bg-muted/20">
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-                <Settings2 className="text-primary h-5 w-5"/> CONFIGURATION BOX
+        <DialogContent className="max-w-7xl h-[90vh] flex flex-col p-0 overflow-hidden glass-card border-border shadow-elevated">
+          <DialogHeader className="p-6 border-b border-border bg-card">
+            <DialogTitle className="flex items-center gap-2 text-xl font-extrabold uppercase tracking-tight">
+              <Settings2 className="text-primary h-5 w-5"/> Workflow Configuration
             </DialogTitle>
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden grid grid-cols-12">
-            {/* LEFT: INFO */}
-            <div className="col-span-4 p-6 border-r overflow-y-auto space-y-6">
+            {/* Sidebar Form */}
+            <div className="col-span-4 p-6 border-r border-border overflow-y-auto space-y-6 bg-muted/20">
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Form Template</Label>
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Form Template Target</Label>
                   <select 
-                    className="w-full bg-background border rounded-md p-2 text-sm outline-none focus:ring-1 focus:ring-primary"
-                    value={formData.form_id}
+                    className="w-full bg-background border border-input rounded-lg h-10 px-3 text-sm font-bold focus:ring-2 focus:ring-primary outline-none transition-all" 
+                    value={formData.form_id} 
                     onChange={(e) => setFormData({...formData, form_id: e.target.value})}
                   >
-                    {masterForms.map(form => (
-                        <option key={form.id} value={form.id}>{form.nama_form}</option>
-                    ))}
+                    {masterForms.map(f => <option key={f.id} value={f.id}>{f.nama_form}</option>)}
                   </select>
                 </div>
-
+                
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Tujuan Penggunaan</Label>
-                  <Input value={formData.penggunaan} onChange={(e) => setFormData({...formData, penggunaan: e.target.value})} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">Status Level</Label>
-                    <Input type="number" value={formData.status_level} onChange={(e) => setFormData({...formData, status_level: e.target.value})} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">Lampiran Wajib</Label>
-                    <Input placeholder="Contoh: PDF" value={formData.lampiran_wajib} onChange={(e) => setFormData({...formData, lampiran_wajib: e.target.value})} />
-                  </div>
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Entity Scope</Label>
+                  <Button 
+                    variant="outline" 
+                    className={`w-full font-bold h-10 text-[10px] ${formData.is_cabang ? 'border-orange-500/50 text-orange-500' : 'border-blue-500/50 text-blue-500'}`} 
+                    onClick={() => setFormData({...formData, is_cabang: !formData.is_cabang})}
+                  >
+                    {formData.is_cabang ? <Building2 className="mr-2 h-3 w-3"/> : <Globe className="mr-2 h-3 w-3"/>}
+                    {formData.is_cabang ? 'OPERASIONAL CABANG' : 'KANTOR PUSAT'}
+                  </Button>
                 </div>
               </div>
 
-              <div className="p-4 bg-muted/30 rounded-lg space-y-4 border border-dashed">
-                <Label className="text-[10px] font-black uppercase text-primary">Input Jabatan (Pisahkan dengan koma)</Label>
-                {['membuat', 'memeriksa', 'menyetujui'].map((key) => (
-                  <div key={key} className="flex gap-2 items-center">
-                    <Input 
-                        placeholder={key.toUpperCase()} 
-                        className="h-8 text-xs"
-                        value={(formData as any)[key]} 
-                        onChange={(e) => setFormData({...formData, [key]: e.target.value})} 
-                    />
-                    <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => addTTDMapping((formData as any)[key])}>
-                        <Plus className="h-3 w-3"/>
-                    </Button>
+              <div className="space-y-4 border-t border-border pt-6">
+                <p className="text-[10px] font-black text-muted-foreground uppercase mb-2 italic">* Input jobs separated by comma</p>
+                {(['membuat', 'memeriksa', 'menyetujui'] as const).map((key) => (
+                  <div key={key} className="space-y-2">
+                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">{key}</Label>
+                    <div className="flex gap-2">
+                      <Input className="text-xs h-9" placeholder="Example: Manager, Direktur..." value={formData[key]} onChange={(e) => setFormData({...formData, [key]: e.target.value})} />
+                      <Button size="icon" className="h-9 w-9 shrink-0" onClick={() => addTTDMapping(key, formData[key])}>
+                        <Plus className="h-4 w-4"/>
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* RIGHT: MAPPING */}
-            <div className="col-span-8 p-6 bg-muted/10 overflow-y-auto">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-bold text-sm uppercase">Excel Coordinate Mapping</h3>
-                <Badge variant="secondary">{formData.ttd_config.length} Jabatan Terdaftar</Badge>
-              </div>
-
-              <div className="space-y-2">
+            {/* Matrix Board */}
+            <div className="col-span-8 p-8 overflow-y-auto bg-background/50 custom-scrollbar">
+              <h3 className="text-xs font-bold mb-6 flex items-center gap-2 uppercase tracking-widest text-muted-foreground">
+                <Database className="h-4 w-4 text-primary"/> Coordinate Matrix Mapping
+              </h3>
+              <div className="grid grid-cols-1 gap-4">
+                {formData.ttd_config.length === 0 && (
+                  <div className="h-40 border-2 border-dashed border-border rounded-xl flex items-center justify-center text-muted-foreground text-xs font-medium">
+                    No mappings generated. Click the "+" button on the sidebar to start.
+                  </div>
+                )}
                 {formData.ttd_config.map((t, i) => (
-                  <div key={i} className="bg-background border rounded-md p-3 grid grid-cols-12 gap-3 items-center">
+                  <div key={i} className="elevated-card rounded-lg p-5 grid grid-cols-12 gap-4 items-end relative group border border-border/50">
                     <div className="col-span-3">
-                      <p className="text-[10px] font-bold text-primary truncate">{t.labelJabatan}</p>
+                      <p className="text-[9px] font-extrabold text-primary uppercase tracking-tighter mb-1">{t.roleName}</p>
+                      <p className="text-xs font-bold truncate text-foreground">{t.labelJabatan}</p>
                     </div>
                     <div className="col-span-2">
-                      <Input className="h-7 text-[10px] text-center uppercase" placeholder="TTD" value={t.ttd} onChange={(e) => {
-                          const newC = [...formData.ttd_config]; newC[i].ttd = e.target.value; setFormData({...formData, ttd_config: newC});
+                      <Label className="text-[8px] font-bold uppercase text-muted-foreground">TTD Cell</Label>
+                      <Input className="h-8 text-[10px] font-mono mt-1 uppercase" placeholder="e.g. C20" value={t.ttd} onChange={(e) => {
+                        const nc = [...formData.ttd_config]; nc[i].ttd = e.target.value; setFormData({...formData, ttd_config: nc});
                       }} />
                     </div>
                     <div className="col-span-2">
-                      <Input className="h-7 text-[10px] text-center uppercase" placeholder="NAMA" value={t.nama} onChange={(e) => {
-                          const newC = [...formData.ttd_config]; newC[i].nama = e.target.value; setFormData({...formData, ttd_config: newC});
+                      <Label className="text-[8px] font-bold uppercase text-muted-foreground">Name Cell</Label>
+                      <Input className="h-8 text-[10px] font-mono mt-1 uppercase" placeholder="e.g. C25" value={t.nama} onChange={(e) => {
+                        const nc = [...formData.ttd_config]; nc[i].nama = e.target.value; setFormData({...formData, ttd_config: nc});
                       }} />
                     </div>
                     <div className="col-span-2">
-                      <Input className="h-7 text-[10px] text-center uppercase" placeholder="JABATAN" value={t.jabatan} onChange={(e) => {
-                          const newC = [...formData.ttd_config]; newC[i].jabatan = e.target.value; setFormData({...formData, ttd_config: newC});
+                      <Label className="text-[8px] font-bold uppercase text-muted-foreground">Job Cell</Label>
+                      <Input className="h-8 text-[10px] font-mono mt-1 uppercase" placeholder="e.g. C26" value={t.jabatan} onChange={(e) => {
+                        const nc = [...formData.ttd_config]; nc[i].jabatan = e.target.value; setFormData({...formData, ttd_config: nc});
                       }} />
                     </div>
                     <div className="col-span-2">
-                      <Input type="number" className="h-7 text-[10px] text-center" value={t.sheet} onChange={(e) => {
-                          const newC = [...formData.ttd_config]; newC[i].sheet = parseInt(e.target.value); setFormData({...formData, ttd_config: newC});
+                      <Label className="text-[8px] font-bold uppercase text-muted-foreground">Sheet Index</Label>
+                      <Input type="number" className="h-8 text-[10px] mt-1" value={t.sheet} onChange={(e) => {
+                        const nc = [...formData.ttd_config]; nc[i].sheet = parseInt(e.target.value); setFormData({...formData, ttd_config: nc});
                       }} />
                     </div>
                     <div className="col-span-1 text-right">
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => {
-                          setFormData({...formData, ttd_config: formData.ttd_config.filter((_, idx) => idx !== i)});
-                      }}><X className="h-3 w-3"/></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => setFormData({...formData, ttd_config: formData.ttd_config.filter((_, idx) => idx !== i)})}>
+                        <X className="h-4 w-4"/>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -326,10 +325,10 @@ export default function WorkflowDetailManagementPage() {
             </div>
           </div>
 
-          <DialogFooter className="p-4 border-t bg-background">
-            <Button variant="ghost" onClick={() => setIsModalOpen(false)}>BATAL</Button>
-            <Button onClick={handleSave} disabled={loading} className="font-bold">
-                {loading ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : 'SIMPAN MATRIKS'}
+          <DialogFooter className="p-6 border-t border-border bg-card">
+            <Button variant="ghost" className="font-bold text-xs" onClick={() => setIsModalOpen(false)}>CANCEL</Button>
+            <Button onClick={handleSave} disabled={loading} className="px-8 font-extrabold text-xs glow-effect">
+              {loading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : 'SAVE WORKFLOW MATRIX'}
             </Button>
           </DialogFooter>
         </DialogContent>
