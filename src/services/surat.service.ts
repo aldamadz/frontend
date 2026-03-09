@@ -344,11 +344,10 @@ export const suratService = {
     const { data: rpcResult, error: rpcError } = await supabase.rpc(
       "handle_approve_surat_v2",
       {
-        p_sig_id:       signatureId,
-        p_surat_id:     suratId,
-        p_signer_name:  userName,
-        p_note:         note,
-        p_file_path:    finalUrl,
+        p_sig_id:    signatureId,
+        p_surat_id:  suratId,
+        p_note:      note,
+        p_file_path: finalUrl,
       }
     );
 

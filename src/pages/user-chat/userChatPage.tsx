@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { picService, ChatMessage } from '@/services/pic.service';
 import {
   Send, Paperclip, X, Lock, LockOpen, MessageSquare,
-  FileText, ExternalLink, Loader2, ChevronRight,
+  FileText, FileCheck, ExternalLink, Loader2, ChevronRight,
   CheckCircle2, Clock, XCircle, Inbox, Search,
   AlertCircle, Download
 } from 'lucide-react';
@@ -20,6 +20,7 @@ interface SuratItem {
   judul_surat: string;
   status: string;
   pic_review_status: string | null;
+  pic_attachment: string | null;
   chat_status: 'OPEN' | 'CLOSED';
   chat_opened_at: string | null;
   updated_at: string;
@@ -132,6 +133,7 @@ const UserChatPage: React.FC = () => {
         .select(`
           id, no_surat, judul_surat, status,
           pic_review_status, chat_status, chat_opened_at, updated_at, pic_id, created_by,
+          pic_attachment,
           pic_profile:profiles!surat_registrasi_pic_id_fkey(full_name),
           penggunaan:master_penggunaan_detail!surat_registrasi_penggunaan_id_fkey(
             master_forms(master_departments(name))
@@ -373,6 +375,29 @@ const UserChatPage: React.FC = () => {
                 }
               </div>
             </div>
+
+            {/* Banner SPK — tampil saat PIC sudah menerbitkan SPK */}
+            {selected.pic_review_status === 'SPK' && selected.pic_attachment && (
+              <div className="mt-3 flex items-center justify-between gap-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
+                    <FileCheck size={16} className="text-emerald-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-emerald-700 uppercase tracking-wider">SPK Telah Diterbitkan</p>
+                    <p className="text-[9px] text-emerald-600/70 mt-0.5">Dokumen SPK sudah tersedia untuk diunduh</p>
+                  </div>
+                </div>
+                <a
+                  href={selected.pic_attachment}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-emerald-700 transition-colors shrink-0 shadow-sm"
+                >
+                  <Download size={12} /> Unduh SPK
+                </a>
+              </div>
+            )}
           </div>
 
           {/* Info banner chat status */}
