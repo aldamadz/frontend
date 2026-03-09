@@ -71,10 +71,20 @@ const MonitoringPage = () => {
   };
 
   // 3. PREVIEW LOGIC
-  const handleOpenPreview = (url: string) => {
+  const handleOpenPreview = async (suratId: string, fallbackUrl: string) => {
+    // Query file_path terbaru dari DB — cegah tampil file lama dari React state
+    const { data } = await supabase
+      .from("surat_registrasi")
+      .select("file_path")
+      .eq("id", suratId)
+      .single();
+
+    const url = data?.file_path || fallbackUrl;
     if (!url) return;
-    const cleanUrl = url.split('?')[0]; 
-    const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(cleanUrl)}&wdPrint=0&wdEmbedCode=0&cb=${Date.now()}`;
+
+    const stripped = url.split('?')[0];
+    const decoded = decodeURIComponent(stripped);
+    const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(decoded)}&wdPrint=0&wdEmbedCode=0`;
     setPreviewUrl(viewerUrl);
   };
 
@@ -247,7 +257,7 @@ const MonitoringPage = () => {
                       <span className="text-[9px] font-black uppercase tracking-widest">Detail</span>
                     </button>
                     <button 
-                      onClick={() => handleOpenPreview(surat.file_path)}
+                      onClick={() => handleOpenPreview(surat.id, surat.file_path)}
                       className="h-10 flex items-center justify-center gap-2 rounded-xl bg-primary text-white hover:bg-primary/90 transition-all shadow-sm group/btn"
                     >
                       <Eye size={14} className="group-hover/btn:scale-110 transition-transform" />

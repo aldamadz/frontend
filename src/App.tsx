@@ -26,6 +26,9 @@ const SuratPage = lazy(() => import("@/pages/surat/SuratPage"));
 const InboxPage = lazy(() => import("@/pages/surat/InboxPage"));
 const MonitoringPage = lazy(() => import("@/pages/surat/MonitoringPage"));
 const PICMonitoringPage = lazy(() => import("@/pages/PIC/MonitoringPICPage"));
+const FinanceReviewPage = lazy(() => import("@/pages/finance/FinanceReviewPage"));
+const PICManagementPage = lazy(() => import("@/pages/admin/PICManagementPage"));
+const UserChatPage = lazy(() => import("@/pages/user-chat/userChatPage"));
 
 // LAZY IMPORT - ADMIN MANAGEMENT
 const UserManagementPage = lazy(() => import("@/pages/admin/UserManagementPage"));
@@ -113,9 +116,13 @@ const App = () => {
               <Route path="/surat/inbox" element={<InboxPage />} />
               <Route path="/surat/monitoring" element={<MonitoringPage />} />
               
+              {/* SURAT CHAT */}
+              <Route path="/surat/chat" element={<UserChatPage />} />
+
               {/* PIC MODULE */}
-              <Route path="/pic/monitoring" element={<PICMonitoringPage />} /> {/* <-- ROUTE BARU PIC */}
-              
+              <Route path="/pic/monitoring" element={<PICMonitoringPage />} />
+              <Route path="/finance/review" element={<FinanceReviewPage />} />
+
               {/* ADMIN MODULE */}
               <Route path="/admin/users" element={<UserManagementPage />} />
               <Route path="/admin/departments" element={<DepartmentManagementPage />} />
@@ -125,6 +132,7 @@ const App = () => {
               <Route path="/admin/offices" element={<OfficeManagementPage />} />
               <Route path="/admin/workflow-details" element={<WorkflowDetailManagementPage />} />
               <Route path="/admin/master-projects" element={<MasterProjectManagementPage />} />
+              <Route path="/admin/pic-management" element={<PICManagementPage />} />
               <Route path="/admin/monitoring" element={<AdminMonitoringPage />} />
             </Route>
 

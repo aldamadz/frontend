@@ -35,46 +35,33 @@ export const suratService = {
     return id;
   },
 
-  getRelativePath(publicUrl: string) {
-    const clean = publicUrl.split("?")[0];
-    return clean.split("dokumen_surat/").pop() || "";
+  getRelativePath(url: string): string {
+    if (!url) return "";
+    const parts = url.split("/dokumen_surat/");
+    const path = parts.length < 2 ? url : parts[1];
+    // FIX: strip query string agar path storage bersih
+    return decodeURIComponent(path.split("?")[0]);
   },
 
-  resolveStampPositions(worksheet: ExcelJS.Worksheet, usageDetail: any, role: string) {
-    const roleClean = role.trim();
-    const results: any[] = [];
-    const ROLE_MAPPING: Record<string, string> = {
-      "BM": "Branch Manager",
-      "Pimp. Dept": "Pimpinan Departemen",
-      "Mkt": "Marketing",
-      "Spv. Mkt": "Supervisor Marketing",
-      "Mgr. Perencanaan": "Manager Perencanaan",
-      "Dir. Bidang": "Direktur Bidang"
-    };
+  resolveStampPositions(usageDetail: any, roleName: string, stepOrder: number): any[] {
+    try {
+      const config = typeof usageDetail.ttd_config === 'string' 
+        ? JSON.parse(usageDetail.ttd_config) 
+        : usageDetail.ttd_config;
 
-    const formalRole = ROLE_MAPPING[roleClean] || roleClean;
+      if (!Array.isArray(config)) return [];
 
-    if (usageDetail.ttd_config && Array.isArray(usageDetail.ttd_config)) {
-      const dynamicMatch = usageDetail.ttd_config.find((cfg: any) => cfg.roleName.trim() === roleClean);
-      if (dynamicMatch) return [{ ttd: dynamicMatch.ttd, nama: dynamicMatch.nama, jabatan: dynamicMatch.jabatan, labelJabatan: dynamicMatch.labelJabatan || formalRole }];
-    }
+      // Mencocokkan berdasarkan step_order sebagai index urutan
+      const matched = config.filter((item: any, index: number) => 
+        (index + 1) === Number(stepOrder)
+      );
 
-    const isRoleMatch = (dbValue: string) => dbValue?.split(/[,\/]+/).map(r => r.trim()).includes(roleClean);
-    const isEmpty = (cell: string) => !worksheet.getCell(cell).value || worksheet.getCell(cell).value?.toString().trim() === "";
-
-    if (isRoleMatch(usageDetail.membuat)) {
-      const col = isEmpty("G38") ? "G" : (isEmpty("H38") ? "H" : "");
-      if (col) results.push({ ttd: `${col}35`, nama: `${col}38`, jabatan: `${col}39`, labelJabatan: formalRole });
+      console.log(`Stamp Match Found for Step ${stepOrder}:`, matched);
+      return matched;
+    } catch (e) {
+      console.error("Error parsing ttd_config:", e);
+      return [];
     }
-    if (isRoleMatch(usageDetail.memeriksa)) {
-      const col = isEmpty("K38") ? "K" : (isEmpty("N38") ? "N" : "");
-      if (col) results.push({ ttd: `${col}35`, nama: `${col}38`, jabatan: `${col}39`, labelJabatan: formalRole });
-    }
-    if (isRoleMatch(usageDetail.menyetujui)) {
-      const col = isEmpty("K44") ? "K" : (isEmpty("N44") ? "N" : "");
-      if (col) results.push({ ttd: `${col}41`, nama: `${col}44`, jabatan: `${col}45`, labelJabatan: formalRole });
-    }
-    return results.length > 0 ? results : null;
   },
 
   async generateNoSurat(payload: any): Promise<{ fullNumber: string; noUrut: number }> {
@@ -148,7 +135,6 @@ export const suratService = {
   async createRegistrasi(payload: any, signers: any[], file: File | null, lampiranFile?: File | null) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
       const noUrut = parseInt(payload.no_surat.split('/')[0]);
       const currentYear = new Date().getFullYear();
 
@@ -205,6 +191,8 @@ export const suratService = {
 
   async cancelRegistration(noSurat: string) {
     const { data: { user } } = await supabase.auth.getUser();
+    if (!noSurat) return false;
+    
     const noUrut = parseInt(noSurat.split('/')[0]);
     const currentYear = new Date().getFullYear();
 
@@ -222,96 +210,159 @@ export const suratService = {
     return true;
   },
 
-  async stampApprovalExcel(suratId: string, currentFilePath: string, userName: string, roleName: string, usageId: string): Promise<string> {
-    const { data: usageDetail } = await supabase.from("master_penggunaan_detail").select("*").eq("id", usageId).single();
+  async stampApprovalExcel(
+    suratId: string, 
+    currentFilePath: string, 
+    userName: string, 
+    roleName: string, 
+    usageId: string,
+    stepOrder: number  // ✅ parameter ini wajib ada dan dikirim dengan benar
+  ): Promise<string> {
+    const { data: usageDetail } = await supabase
+      .from("master_penggunaan_detail")
+      .select("*")
+      .eq("id", usageId)
+      .single();
+
     if (!usageDetail) return currentFilePath;
 
+    // FIX BUG 2: getRelativePath sudah strip query string, download path bersih
     const relativePath = this.getRelativePath(currentFilePath);
-    const { data: fileData, error: dlError } = await supabase.storage.from("dokumen_surat").download(relativePath);
-    if (dlError || !fileData) throw new Error("Gagal download file.");
+    const { data: fileData, error: dlError } = await supabase.storage
+      .from("dokumen_surat")
+      .download(relativePath); // ✅ tidak ada ?t=Date.now() lagi
+
+    if (dlError || !fileData) {
+      console.error("Gagal download file untuk stamping:", dlError);
+      throw new Error("Gagal download file.");
+    }
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await fileData.arrayBuffer());
-    const worksheet = workbook.worksheets[0];
-    const positions = this.resolveStampPositions(worksheet, usageDetail, roleName);
-
-    if (positions) {
-      const now = new Date();
-      positions.forEach((pos: any) => {
-        const ttdCell = worksheet.getCell(pos.ttd);
-        ttdCell.value = `Disetujui by sistem\n✅\n${now.toLocaleDateString("id-ID")}\n${now.toLocaleTimeString("id-ID")} WIB`;
-        ttdCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-        worksheet.getRow(parseInt(pos.ttd.match(/\d+/)?.[0] || '35')).height = 65;
-        
-        worksheet.getCell(pos.nama).value = userName.toUpperCase();
-        worksheet.getCell(pos.jabatan).value = pos.labelJabatan;
-      });
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const newPath = relativePath.replace(".xlsx", `_v${Date.now()}.xlsx`);
-    await supabase.storage.from("dokumen_surat").upload(newPath, buffer, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", upsert: true });
     
-    const { data: { publicUrl } } = supabase.storage.from("dokumen_surat").getPublicUrl(newPath);
-    await supabase.from("surat_registrasi").update({ file_path: publicUrl }).eq("id", suratId);
-    return publicUrl;
+    const positions = this.resolveStampPositions(usageDetail, roleName, stepOrder);
+
+    if (positions && positions.length > 0) {
+      const now = new Date();
+      workbook.worksheets.forEach(worksheet => {
+        positions.forEach((pos: any) => {
+          const ttdCell = worksheet.getCell(pos.ttd);
+          ttdCell.value = `Approved by System\n✅\n${now.toLocaleDateString("id-ID")}\n${now.toLocaleTimeString("id-ID")} WIB`;
+          ttdCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+          
+          const rowNum = parseInt(pos.ttd.match(/\d+/)?.[0] || '35');
+          worksheet.getRow(rowNum).height = 65; 
+
+          if (pos.nama) worksheet.getCell(pos.nama).value = userName.toUpperCase();
+          if (pos.jabatan) worksheet.getCell(pos.jabatan).value = pos.labelJabatan || "";
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const newPath = `dokumen/signed_${suratId}_step${stepOrder}_${Date.now()}.xlsx`;
+      
+      const { error: upError } = await supabase.storage
+        .from("dokumen_surat")
+        .upload(newPath, buffer, { 
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+          upsert: true 
+        });
+
+      if (upError) throw upError;
+      
+      const { data: { publicUrl } } = supabase.storage.from("dokumen_surat").getPublicUrl(newPath);
+      return publicUrl;
+    }
+    
+    return currentFilePath;
   },
 
-  async approveSurat(signatureId: string, suratId: string, currentStep: number, userName: string, note: string = "") {
+  async approveSurat(
+    signatureId: string,
+    suratId: string,
+    currentStep: number,
+    userName: string,
+    note: string = ""
+  ): Promise<{ success: boolean }> {
+
+    /* --- 1. VALIDASI LOCK STEP + AMBIL DATA SURAT --- */
+    const { data: suratFresh, error: suratErr } = await supabase
+      .from("surat_registrasi")
+      .select("current_step, file_path, penggunaan_id")
+      .eq("id", suratId)
+      .single();
+
+    if (suratErr || !suratFresh) throw new Error("Dokumen tidak ditemukan.");
+    if (suratFresh.current_step !== currentStep) throw new Error("Dokumen sudah diproses. Silakan refresh.");
+
+    /* --- 2. AMBIL ROLE DARI SIGNATURE --- */
     const { data: sigInfo } = await supabase
       .from("surat_signatures")
-      .select(`role_name, surat_registrasi (file_path, penggunaan_id)`)
+      .select("role_name")
       .eq("id", signatureId)
       .single();
 
-    const suratData = Array.isArray(sigInfo?.surat_registrasi) 
-      ? sigInfo?.surat_registrasi[0] 
-      : sigInfo?.surat_registrasi;
+    if (!sigInfo) throw new Error("Data tanda tangan tidak valid.");
 
-    let finalUrl = suratData?.file_path;
+    /* --- 3. TENTUKAN BASE FILE UNTUK DISTEMPEL
+       Step 1 : file_path original dari surat_registrasi
+       Step 2+: file_path_snap step sebelumnya
+    --- */
+    let baseFilePath = suratFresh.file_path;
 
-    if (suratData?.file_path?.toLowerCase().includes(".xlsx") && suratData?.penggunaan_id) {
+    if (currentStep > 1) {
+      const { data: prevSnap } = await supabase
+        .from("surat_signatures")
+        .select("file_path_snap")
+        .eq("surat_id", suratId)
+        .eq("step_order", currentStep - 1)
+        .eq("is_signed", true)
+        .single();
+
+      if (prevSnap?.file_path_snap) baseFilePath = prevSnap.file_path_snap;
+    }
+
+    /* --- 4. STAMP EXCEL (di client dengan ExcelJS) --- */
+    let finalUrl = baseFilePath ?? "";
+
+    if (baseFilePath?.split("?")[0].toLowerCase().endsWith(".xlsx") && suratFresh.penggunaan_id) {
       finalUrl = await this.stampApprovalExcel(
-        suratId, 
-        suratData.file_path, 
-        userName, 
-        sigInfo!.role_name, 
-        suratData.penggunaan_id
+        suratId,
+        baseFilePath,
+        userName,
+        sigInfo.role_name,
+        suratFresh.penggunaan_id,
+        currentStep
       );
     }
 
-    const { error: updateSigError } = await supabase
-      .from("surat_signatures")
-      .update({ 
-        is_signed: true,
-        signed_at: new Date().toISOString(),
-        file_path_snap: finalUrl,
-        catatan: note,
-        status: 'SUCCESS'
-      })
-      .eq("id", signatureId);
+    /* --- 5. PANGGIL RPC handle_approve_surat_v2 (SECURITY DEFINER)
+       RPC ini atomic: update signature + file_path + step/status sekaligus.
+       Bypass RLS karena RLS tidak punya policy UPDATE untuk surat_registrasi
+       yang bisa diakses dari signer (hanya creator yang bisa update sebelumnya).
+    --- */
+    const { data: rpcResult, error: rpcError } = await supabase.rpc(
+      "handle_approve_surat_v2",
+      {
+        p_sig_id:       signatureId,
+        p_surat_id:     suratId,
+        p_signer_name:  userName,
+        p_note:         note,
+        p_file_path:    finalUrl,
+      }
+    );
 
-    if (updateSigError) throw updateSigError;
+    if (rpcError) throw new Error(rpcError.message);
+    if (!rpcResult?.success) throw new Error("Gagal memproses persetujuan.");
 
-    const { data, error } = await supabase.rpc('handle_approve_surat', { 
-      p_sig_id: signatureId, 
-      p_surat_id: suratId, 
-      p_current_step: currentStep, 
-      p_signer_name: userName, 
-      p_note: note 
-    });
-
-    if (error) throw error;
-    return data;
+    return { success: true };
   },
 
-  // FUNGSI UNTUK REJECT SURAT (MEMPERBAIKI ERROR TS)
   async rejectSurat(signatureId: string, suratId: string, note: string) {
-    // Update status di signature
     const { error: sigError } = await supabase
       .from("surat_signatures")
       .update({
-        is_signed: true, // Dianggap selesai memproses (tapi reject)
+        is_signed: true,
         signed_at: new Date().toISOString(),
         catatan: note,
         status: 'REJECTED'
@@ -320,12 +371,9 @@ export const suratService = {
 
     if (sigError) throw sigError;
 
-    // Update status di tabel utama surat_registrasi
     const { error: suratError } = await supabase
       .from("surat_registrasi")
-      .update({
-        status: 'REJECTED'
-      })
+      .update({ status: 'REJECTED' })
       .eq("id", suratId);
 
     if (suratError) throw suratError;
@@ -333,12 +381,18 @@ export const suratService = {
   },
 
   async getMyInbox(userId: string) {
-    const { data, error } = await supabase.from("surat_signatures").select(`id, role_name, step_order, is_signed, surat_id, surat_registrasi!inner (*)`).eq("user_id", userId).eq("is_signed", false);
+    const { data, error } = await supabase
+      .from("surat_signatures")
+      .select(`id, role_name, step_order, is_signed, surat_id, surat_registrasi!inner (*)`)
+      .eq("user_id", userId)
+      .eq("is_signed", false);
+
     if (error) return [];
+
     return data.map((sig: any) => {
       const surat = Array.isArray(sig.surat_registrasi) ? sig.surat_registrasi[0] : sig.surat_registrasi;
       if (!surat || Number(sig.step_order) !== Number(surat.current_step)) return null;
-      return { ...sig, surat_registrasi: { ...surat, file_path: `${surat.file_path}?cb=${Date.now()}` } };
+      return { ...sig, surat_registrasi: surat };
     }).filter(Boolean);
   },
 
@@ -349,10 +403,18 @@ export const suratService = {
   },
 
   async getAllSurat(userId?: string): Promise<SuratRegistrasi[]> {
-    let query = supabase.from("surat_registrasi").select(`*, surat_signatures (*, profiles:user_id (full_name))`).order("created_at", { ascending: false });
+    let query = supabase
+      .from("surat_registrasi")
+      .select(`*, surat_signatures (*, profiles:user_id (full_name))`)
+      .order("created_at", { ascending: false });
+
     if (userId) query = query.eq('created_by', userId);
     const { data } = await query;
-    return (data || []).map((s: any) => ({ ...s, surat_signatures: s.surat_signatures?.sort((a: any, b: any) => a.step_order - b.step_order) || [] })) as SuratRegistrasi[];
+
+    return (data || []).map((s: any) => ({ 
+      ...s, 
+      surat_signatures: s.surat_signatures?.sort((a: any, b: any) => a.step_order - b.step_order) || [] 
+    })) as SuratRegistrasi[];
   },
 
   async getMasterData() {
@@ -363,9 +425,17 @@ export const suratService = {
       supabase.from("master_letter_types").select("*"),
       supabase.from("profiles").select("id, full_name").order("full_name"),
       supabase.from("master_projects").select("*").order("name"),
-      supabase.from("master_penggunaan_detail").select("*").order("penggunaan")
+      supabase.from("master_penggunaan_detail").select("*").order("created_at", { ascending: false })
     ]);
-    return { entities: res[0].data || [], offices: res[1].data || [], depts: res[2].data || [], types: res[3].data || [], users: res[4].data || [], projects: res[5].data || [], penggunaan: res[6].data || [] };
+    return { 
+      entities: res[0].data || [], 
+      offices: res[1].data || [], 
+      depts: res[2].data || [], 
+      types: res[3].data || [], 
+      users: res[4].data || [], 
+      projects: res[5].data || [], 
+      penggunaan: res[6].data || [] 
+    };
   },
 
   async downloadFilledTemplate(payload: any, templateLink: string) {
@@ -399,7 +469,10 @@ export const suratService = {
   },
 
   getPreviewUrl(publicUrl: string) {
-    // Menggunakan officeapps.live.com (Microsoft Office Viewer) seringkali lebih stabil untuk .xlsx
-    return publicUrl ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : "";
-  }
+    if (!publicUrl) return "";
+    const stripped = publicUrl.split('?')[0];
+    const decoded = decodeURIComponent(stripped);
+    return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(decoded)}&wdPrint=0&wdEmbedCode=0`;
+  },
+
 };
