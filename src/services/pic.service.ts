@@ -181,6 +181,30 @@ export const picService = {
     if (error) throw new Error(error.message);
   },
 
+/**
+   * Mengirim pesan otomatis dari sistem ke dalam chat.
+   */
+  async sendSystemMessage(suratId: string, message: string): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    const { error } = await supabase
+      .from("surat_chats")
+      .insert({
+        surat_id: suratId,
+        sender_id: user?.id || null, // Tetap catat siapa yang memicu sistem message jika perlu
+        sender_name: "SYSTEM",
+        sender_role: "system",
+        message: message.trim(),
+        is_system: true,
+        is_read: false,
+      });
+
+    if (error) {
+      console.error("sendSystemMessage error:", error);
+      throw new Error(error.message);
+    }
+  },  
+
   /**
    * Kirim pesan chat.
    * Signature: (suratId, message, attachmentUrl?) — kompatibel dengan PICReviewDetail.

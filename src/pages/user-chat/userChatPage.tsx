@@ -28,26 +28,46 @@ interface SuratItem {
   created_by: string;
   pic_name?: string | null;
   dept_name?: string | null;
+  // File fields
+  file_path?: string | null;
+  lampiran_path?: string | null;
+  payment_file_path?: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+const getFileUrl = (path: string | null): string | null => {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  const bucket =
+    path.startsWith('spk_files/') ? 'spk_files' :
+    path.startsWith('payment_files/') ? 'spk_files' :
+    path.startsWith('chat_attachments/') ? 'chat_attachments' :
+    path.startsWith('lampiran_') ? 'lampiran_surat' :
+    'dokumen_surat';
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+};
+
 const getStatusBadge = (surat: SuratItem) => {
   const r = surat.pic_review_status;
-  if (r === 'SPK')      return { label: 'SPK Diterbitkan', color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' };
-  if (r === 'KEUANGAN') return { label: 'Tim Keuangan',    color: 'text-blue-600 bg-blue-500/10 border-blue-500/20' };
-  if (r === 'REJECTED') return { label: 'Ditolak PIC',     color: 'text-red-600 bg-red-500/10 border-red-500/20' };
-  if (r === 'PENDING')  return { label: 'Review PIC',      color: 'text-amber-600 bg-amber-500/10 border-amber-500/20' };
-  if (surat.status === 'DONE') return { label: 'Menunggu PIC', color: 'text-slate-500 bg-slate-500/10 border-slate-500/20' };
-  return { label: surat.status, color: 'text-muted-foreground bg-muted border-border' };
+  if (r === 'SPK')               return { label: 'SPK Diterbitkan',  color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' };
+  if (r === 'KEUANGAN')          return { label: 'Tim Keuangan',      color: 'text-blue-600 bg-blue-500/10 border-blue-500/20' };
+  if (r === 'KEUANGAN_DONE')     return { label: 'Keuangan Selesai',  color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' };
+  if (r === 'KEUANGAN_REJECTED') return { label: 'Ditolak Keuangan', color: 'text-red-600 bg-red-500/10 border-red-500/20' };
+  if (r === 'REJECTED')          return { label: 'Ditolak PIC',       color: 'text-red-600 bg-red-500/10 border-red-500/20' };
+  if (r === 'PENDING')           return { label: 'Review PIC',        color: 'text-amber-600 bg-amber-500/10 border-amber-500/20' };
+  if (surat.status === 'DONE')   return { label: 'Menunggu PIC',      color: 'text-slate-500 bg-slate-500/10 border-slate-500/20' };
+  return { label: surat.status,                                        color: 'text-muted-foreground bg-muted border-border' };
 };
 
 const StatusIcon = ({ surat }: { surat: SuratItem }) => {
   const r = surat.pic_review_status;
-  if (r === 'SPK')      return <CheckCircle2 size={13} className="text-emerald-600" />;
-  if (r === 'KEUANGAN') return <CheckCircle2 size={13} className="text-blue-600" />;
-  if (r === 'REJECTED') return <XCircle size={13} className="text-red-600" />;
-  if (r === 'PENDING')  return <Clock size={13} className="text-amber-600" />;
+  if (r === 'SPK')               return <CheckCircle2 size={13} className="text-emerald-600" />;
+  if (r === 'KEUANGAN')          return <CheckCircle2 size={13} className="text-blue-600" />;
+  if (r === 'KEUANGAN_DONE')     return <CheckCircle2 size={13} className="text-emerald-600" />;
+  if (r === 'KEUANGAN_REJECTED') return <XCircle size={13} className="text-red-600" />;
+  if (r === 'REJECTED')          return <XCircle size={13} className="text-red-600" />;
+  if (r === 'PENDING')           return <Clock size={13} className="text-amber-600" />;
   return <Clock size={13} className="text-slate-400" />;
 };
 
@@ -77,7 +97,7 @@ const UserChatPage: React.FC = () => {
     });
   }, []);
 
-  // ── Realtime: update list saat chat_status berubah di DB ────────────────
+  // ── Realtime: update list saat chat_status berubah di DB ───────────────
   useEffect(() => {
     if (!currentUser) return;
     const ch = supabase
@@ -92,7 +112,6 @@ const UserChatPage: React.FC = () => {
         },
         (payload) => {
           const updated = payload.new as any;
-          // Update item di list tanpa refetch penuh
           queryClient.setQueryData(
             ['user-chat-list', currentUser.id],
             (old: SuratItem[] | undefined) =>
@@ -102,18 +121,22 @@ const UserChatPage: React.FC = () => {
                       ...s,
                       chat_status: updated.chat_status,
                       pic_review_status: updated.pic_review_status,
+                      pic_attachment: updated.pic_attachment,
                       updated_at: updated.updated_at,
                     }
                   : s
               )
           );
-          // Juga update selected jika itu dokumen yang sama
           setSelected((prev) =>
             prev?.id === updated.id
-              ? { ...prev, chat_status: updated.chat_status, pic_review_status: updated.pic_review_status }
+              ? {
+                  ...prev,
+                  chat_status: updated.chat_status,
+                  pic_review_status: updated.pic_review_status,
+                  pic_attachment: updated.pic_attachment,
+                }
               : prev
           );
-          // Sync chat status panel
           if (selected?.id === updated.id) {
             setChatStatus(updated.chat_status);
           }
@@ -123,7 +146,7 @@ const UserChatPage: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [currentUser, queryClient, selected?.id]);
 
-  // ── Fetch surat milik user (status DONE ke atas) ──────────────────────
+  // ── Fetch surat milik user ────────────────────────────────────────────
   const { data: suratList = [], isLoading } = useQuery<SuratItem[]>({
     queryKey: ['user-chat-list', currentUser?.id],
     enabled: !!currentUser,
@@ -133,11 +156,12 @@ const UserChatPage: React.FC = () => {
         .select(`
           id, no_surat, judul_surat, status,
           pic_review_status, chat_status, chat_opened_at, updated_at, pic_id, created_by,
-          pic_attachment,
+          pic_attachment, file_path, lampiran_path,
           pic_profile:profiles!surat_registrasi_pic_id_fkey(full_name),
           penggunaan:master_penggunaan_detail!surat_registrasi_penggunaan_id_fkey(
             master_forms(master_departments(name))
-          )
+          ),
+          finance_reviews(payment_file_path, status)
         `)
         .eq('created_by', currentUser!.id)
         .eq('status', 'DONE')
@@ -148,6 +172,7 @@ const UserChatPage: React.FC = () => {
         ...s,
         pic_name: s.pic_profile?.[0]?.full_name ?? null,
         dept_name: s.penggunaan?.master_forms?.master_departments?.name ?? null,
+        payment_file_path: s.finance_reviews?.[0]?.payment_file_path ?? null,
       }));
     },
   });
@@ -167,7 +192,7 @@ const UserChatPage: React.FC = () => {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  // ── Sync chatStatus dari selected (realtime list update) ─────────────────
+  // ── Sync chatStatus dari selected ─────────────────────────────────────
   useEffect(() => {
     if (selected) setChatStatus(selected.chat_status ?? 'CLOSED');
   }, [selected?.chat_status]);
@@ -181,7 +206,7 @@ const UserChatPage: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [selected?.id]);
 
-  // ── Toast notif saat chat_status berubah (ditangani oleh channel list) ──
+  // ── Toast notif saat chat_status berubah ──────────────────────────────
   const prevChatStatusRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selected) return;
@@ -213,8 +238,8 @@ const UserChatPage: React.FC = () => {
       let fileUrl: string | null = null;
       if (attachment) {
         const path = `chat_attachments/${Date.now()}-${attachment.name}`;
-        await supabase.storage.from('surat-docs').upload(path, attachment);
-        fileUrl = supabase.storage.from('surat-docs').getPublicUrl(path).data.publicUrl;
+        await supabase.storage.from('chat_attachments').upload(path, attachment);
+        fileUrl = supabase.storage.from('chat_attachments').getPublicUrl(path).data.publicUrl;
       }
       await picService.sendMessage(selected.id, newMessage, fileUrl, 'creator');
       setNewMessage('');
@@ -226,19 +251,13 @@ const UserChatPage: React.FC = () => {
     }
   };
 
-  const getFileUrl = (path: string | null) => {
-    if (!path) return null;
-    if (path.startsWith('http')) return path;
-    return supabase.storage.from('surat-docs').getPublicUrl(path).data.publicUrl;
-  };
-
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
 
       {/* ── SIDEBAR KIRI ── */}
       <div className="w-[320px] shrink-0 flex flex-col border-r border-border bg-card/20">
-        
+
         {/* Header sidebar */}
         <div className="px-5 pt-6 pb-4 border-b border-border">
           <div className="flex items-center gap-2 mb-1">
@@ -340,7 +359,7 @@ const UserChatPage: React.FC = () => {
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden">
 
-          {/* Header chat */}
+          {/* ── HEADER CHAT ── */}
           <div className="px-6 py-4 border-b border-border bg-card/50 backdrop-blur-sm shrink-0">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
@@ -376,7 +395,58 @@ const UserChatPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Banner SPK — tampil saat PIC sudah menerbitkan SPK */}
+            {/* ── TOMBOL FILE: Dokumen, Lampiran, SPK, Bukti Bayar ── */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {/* Dokumen utama */}
+              {selected.file_path && (
+                <a
+                  href={selected.file_path}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase border bg-primary/5 text-primary border-primary/20 hover:bg-primary/10 transition-all"
+                >
+                  <FileText size={12} /> Dokumen
+                </a>
+              )}
+
+              {/* Lampiran */}
+              {selected.lampiran_path && (
+                <a
+                  href={selected.lampiran_path}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase border bg-muted text-muted-foreground border-border hover:bg-accent transition-all"
+                >
+                  <Paperclip size={12} /> Lampiran
+                </a>
+              )}
+
+              {/* SPK dari PIC */}
+              {selected.pic_attachment && (
+                <a
+                  href={getFileUrl(selected.pic_attachment) ?? '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase border bg-emerald-500/5 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/10 transition-all"
+                >
+                  <FileCheck size={12} /> SPK
+                </a>
+              )}
+
+              {/* Bukti pembayaran dari keuangan */}
+              {selected.payment_file_path && (
+                <a
+                  href={getFileUrl(selected.payment_file_path) ?? '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase border bg-blue-500/5 text-blue-600 border-blue-500/20 hover:bg-blue-500/10 transition-all"
+                >
+                  <Download size={12} /> Bukti Bayar
+                </a>
+              )}
+            </div>
+
+            {/* ── BANNER SPK ── */}
             {selected.pic_review_status === 'SPK' && selected.pic_attachment && (
               <div className="mt-3 flex items-center justify-between gap-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -389,7 +459,7 @@ const UserChatPage: React.FC = () => {
                   </div>
                 </div>
                 <a
-                  href={selected.pic_attachment}
+                  href={getFileUrl(selected.pic_attachment) ?? '#'}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-emerald-700 transition-colors shrink-0 shadow-sm"
@@ -398,9 +468,58 @@ const UserChatPage: React.FC = () => {
                 </a>
               </div>
             )}
+
+            {/* ── BANNER KEUANGAN SELESAI ── */}
+            {selected.pic_review_status === 'KEUANGAN_DONE' && selected.payment_file_path && (
+              <div className="mt-3 flex items-center justify-between gap-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0">
+                    <Download size={16} className="text-blue-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-blue-700 uppercase tracking-wider">Keuangan Telah Memproses</p>
+                    <p className="text-[9px] text-blue-600/70 mt-0.5">Bukti pembayaran sudah tersedia untuk diunduh</p>
+                  </div>
+                </div>
+                <a
+                  href={getFileUrl(selected.payment_file_path) ?? '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-blue-700 transition-colors shrink-0 shadow-sm"
+                >
+                  <Download size={12} /> Unduh Bukti
+                </a>
+              </div>
+            )}
+
+            {/* ── BANNER KEUANGAN DITOLAK ── */}
+            {selected.pic_review_status === 'KEUANGAN_REJECTED' && (
+              <div className="mt-3 flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
+                <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center shrink-0">
+                  <XCircle size={16} className="text-red-600" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-red-700 uppercase tracking-wider">Ditolak oleh Tim Keuangan</p>
+                  <p className="text-[9px] text-red-600/70 mt-0.5">Hubungi PIC untuk informasi lebih lanjut</p>
+                </div>
+              </div>
+            )}
+
+            {/* ── BANNER DITOLAK PIC ── */}
+            {selected.pic_review_status === 'REJECTED' && (
+              <div className="mt-3 flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
+                <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center shrink-0">
+                  <XCircle size={16} className="text-red-600" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-red-700 uppercase tracking-wider">Ditolak oleh PIC</p>
+                  <p className="text-[9px] text-red-600/70 mt-0.5">Periksa catatan penolakan di riwayat chat</p>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Info banner chat status */}
+          {/* ── INFO BANNER CHAT STATUS ── */}
           {chatStatus === 'CLOSED' && (
             <div className="mx-6 mt-4 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl flex items-start gap-3 shrink-0">
               <AlertCircle size={15} className="text-amber-500 mt-0.5 shrink-0" />
@@ -424,7 +543,7 @@ const UserChatPage: React.FC = () => {
             </div>
           )}
 
-          {/* Messages */}
+          {/* ── MESSAGES ── */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-4 scroll-smooth">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full gap-3 opacity-20">
@@ -434,11 +553,8 @@ const UserChatPage: React.FC = () => {
             )}
 
             {messages.map((msg) => {
-              // Gunakan sender_role: 'creator' = kanan, 'pic' = kiri
-            // Ini satu-satunya cara reliable jika created_by === pic_id
-            const isMe = msg.sender_role === 'creator';
+              const isMe = msg.sender_role === 'creator';
 
-              // Pesan sistem
               if (msg.is_system) {
                 return (
                   <div key={msg.id} className="flex justify-center">
@@ -468,7 +584,7 @@ const UserChatPage: React.FC = () => {
                     }`}>
                       {msg.attachment_url && (
                         <a
-                          href={getFileUrl(msg.attachment_url)!}
+                          href={getFileUrl(msg.attachment_url) ?? '#'}
                           target="_blank"
                           rel="noreferrer"
                           className={`flex items-center gap-2 mb-2 p-2 rounded-lg border text-[10px] font-bold uppercase ${
@@ -487,7 +603,7 @@ const UserChatPage: React.FC = () => {
             })}
           </div>
 
-          {/* Input area */}
+          {/* ── INPUT AREA ── */}
           <div className="px-6 py-4 border-t border-border bg-card/30 shrink-0">
             {attachment && (
               <div className="flex items-center justify-between mb-3 bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg">
