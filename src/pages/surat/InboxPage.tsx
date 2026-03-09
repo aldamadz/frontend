@@ -83,33 +83,43 @@ export default function InboxPage() {
     setCurrentPage(1); // Reset ke halaman 1 saat mencari
   };
 
-  // FUNGSI APPROVE
-  const handleApprove = async (item: any) => {
-    if (!currentUser?.full_name) {
-      toast.error("Profil tidak lengkap.");
-      return;
-    }
+// FUNGSI APPROVE
+const handleApprove = async (item: any) => {
+  if (!currentUser?.full_name) {
+    toast.error("Profil tidak lengkap.");
+    return;
+  }
 
-    setProcessingId(item.id);
-    try {
-      const note = notes[item.id] || "";
-      const result = await suratService.approveSurat(
-        item.id, 
-        item.surat_id, 
-        item.surat_registrasi.current_step, 
-        currentUser.full_name,
-        note 
-      );
-      
-      toast.success(result.isDone ? "Dokumen Selesai!" : "Berhasil diteruskan.");
-      queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
-    } catch (error: any) {
-      console.error("Approve Error:", error);
-      toast.error(error.message || "Gagal menyetujui dokumen.");
-    } finally {
-      setProcessingId(null);
-    }
-  };
+  setProcessingId(item.id);
+  try {
+    const note = notes[item.id] || "";
+
+    await suratService.approveSurat(
+      item.id, 
+      item.surat_id, 
+      item.surat_registrasi.current_step, 
+      currentUser.full_name,
+      note 
+    );
+    
+    toast.success("Dokumen Berhasil Disetujui", {
+      description: "Data telah diperbarui dan diteruskan ke tahap selanjutnya."
+    });
+    
+    setNotes(prev => {
+      const newNotes = { ...prev };
+      delete newNotes[item.id];
+      return newNotes;
+    });
+
+    queryClient.invalidateQueries({ queryKey: ['surat-inbox'] });
+  } catch (error: any) {
+    console.error("Approve Error:", error);
+    toast.error(error.message || "Gagal menyetujui dokumen.");
+  } finally {
+    setProcessingId(null);
+  }
+};
 
   // FUNGSI REJECT
   const handleReject = async (item: any) => {
@@ -138,10 +148,21 @@ export default function InboxPage() {
     }
   };
 
-  const openPreview = (url: string) => {
+  const openPreview = async (suratId: string, fallbackUrl: string) => {
+    // Query file_path terbaru dari DB — cegah tampil file lama dari React state
+    const { data } = await supabase
+      .from("surat_registrasi")
+      .select("file_path")
+      .eq("id", suratId)
+      .single();
+    
+    const url = data?.file_path || fallbackUrl;
     if (!url) return;
-    const cleanUrl = url.split('?')[0]; 
-    const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(cleanUrl)}&wdPrint=0&wdEmbedCode=0&cb=${Date.now()}`;
+    
+    // Decode dulu sebelum encode ulang — cegah %20 → %2520 → preview kosong
+    const stripped = url.split('?')[0];
+    const decoded = decodeURIComponent(stripped);
+    const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(decoded)}&wdPrint=0&wdEmbedCode=0`;
     setPreviewUrl(viewerUrl);
   };
 
@@ -257,7 +278,7 @@ export default function InboxPage() {
                   <Button 
                     variant="outline" 
                     className="w-full h-10 text-[10px] font-black uppercase tracking-widest hover:bg-muted"
-                    onClick={() => openPreview(item.surat_registrasi.file_path)}
+                    onClick={() => openPreview(item.surat_registrasi.id, item.surat_registrasi.file_path)}
                   >
                     <Eye size={14} className="mr-2" /> Preview Utama
                   </Button>
