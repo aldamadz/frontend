@@ -25,8 +25,7 @@ const NotFound = lazy(() => import("@/pages/NotFound"));
 const SuratPage = lazy(() => import("@/pages/surat/SuratPage"));
 const InboxPage = lazy(() => import("@/pages/surat/InboxPage"));
 const MonitoringPage = lazy(() => import("@/pages/surat/MonitoringPage"));
-const PICMonitoringPage = lazy(() => import("@/pages/PIC/MonitoringPICPage"));
-const FinanceReviewPage = lazy(() => import("@/pages/finance/FinanceReviewPage"));
+const PICMonitoringPage = lazy(() => import("@/pages/monitoring-pic/MonitoringPICPage"));
 const PICManagementPage = lazy(() => import("@/pages/admin/PICManagementPage"));
 const UserChatPage = lazy(() => import("@/pages/user-chat/userChatPage"));
 
@@ -121,7 +120,6 @@ const App = () => {
 
               {/* PIC MODULE */}
               <Route path="/pic/monitoring" element={<PICMonitoringPage />} />
-              <Route path="/finance/review" element={<FinanceReviewPage />} />
 
               {/* ADMIN MODULE */}
               <Route path="/admin/users" element={<UserManagementPage />} />

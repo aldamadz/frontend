@@ -58,10 +58,41 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
 
   // ── Badge states ──────────────────────────────────────────────────────────
   const [chatBadgeCount, setChatBadgeCount] = useState(0)
+  const [creatorChatBadge, setCreatorChatBadge] = useState(0) // pesan dari PIC belum dibaca (untuk pembuat)
+  const [monitoringBadge, setMonitoringBadge] = useState(0) // surat menunggu review PIC
   const [financeBadgeCount, setFinanceBadgeCount] = useState(0)
   const [picQueueCount, setPicQueueCount] = useState(0)
   const prevChatCountRef = useRef(0)
   const prevFinanceCountRef = useRef(0)
+
+  // ── Reset picQueueCount saat user membuka /pic/monitoring ─────────────────
+  useEffect(() => {
+    if (location.pathname.startsWith('/pic/monitoring') && user?.id && isUserPIC) {
+      // Re-fetch badge setelah sedikit delay (beri waktu halaman proses)
+      const t = setTimeout(async () => {
+        const { data: deptPics } = await supabase
+          .from('master_dept_pics').select('dept_id').eq('user_id', user.id);
+        if (!deptPics?.length) { setPicQueueCount(0); return; }
+        const deptIds = deptPics.map((d: any) => d.dept_id);
+        const { data: forms } = await supabase
+          .from('master_forms').select('id').in('department_id', deptIds);
+        if (!forms?.length) { setPicQueueCount(0); return; }
+        const formIds = forms.map((f: any) => f.id);
+        const { data: penggunaans } = await supabase
+          .from('master_penggunaan_detail').select('id').in('form_id', formIds);
+        if (!penggunaans?.length) { setPicQueueCount(0); return; }
+        const penggunaanIds = penggunaans.map((p: any) => p.id);
+        const { count } = await supabase
+          .from('surat_registrasi')
+          .select('id', { count: 'exact', head: true })
+          .in('penggunaan_id', penggunaanIds)
+          .eq('pic_review_status', 'PENDING')
+          .eq('status', 'DONE');
+        setPicQueueCount(count ?? 0);
+      }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [location.pathname, user?.id, isUserPIC]);
 
   // ── Auto-expand active section ────────────────────────────────────────────
   useEffect(() => {
@@ -106,27 +137,29 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     if (!user?.id) return;
 
     const fetchInboxCount = async () => {
+      // Query surat_registrasi yang PROSES dulu, lalu cek signature user
+      const { data: suratProses } = await supabase
+        .from('surat_registrasi')
+        .select('id, current_step')
+        .eq('status', 'PROSES');
+
+      if (!suratProses?.length) { setInboxCount(0); return; }
+
+      const suratIds = suratProses.map((s: any) => s.id);
+      const currentStepMap: Record<string, number> = {};
+      suratProses.forEach((s: any) => { currentStepMap[s.id] = s.current_step; });
+
       const { data, error } = await supabase
         .from('surat_signatures')
-        .select(`
-          id,
-          step_order,
-          surat_registrasi!inner (
-            current_step,
-            status
-          )
-        `)
+        .select('id, step_order, surat_id')
         .eq('user_id', user.id)
         .eq('is_signed', false)
-        .eq('surat_registrasi.status', 'PROSES');
+        .in('surat_id', suratIds);
 
       if (!error && data) {
-        const actualPending = data.filter((sig: any) => {
-          const registrasi = Array.isArray(sig.surat_registrasi) 
-            ? sig.surat_registrasi[0] 
-            : sig.surat_registrasi;
-          return registrasi && sig.step_order === registrasi.current_step;
-        });
+        const actualPending = data.filter((sig: any) =>
+          sig.step_order === currentStepMap[sig.surat_id]
+        );
         setInboxCount(actualPending.length);
       }
     };
@@ -170,6 +203,7 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
       } catch {}
     };
 
+    // Fetch count langsung dari DB — selalu akurat karena baca is_read terbaru
     const fetchChatBadge = async () => {
       const { data: deptPics } = await supabase
         .from('master_dept_pics').select('dept_id').eq('user_id', user.id);
@@ -203,33 +237,101 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         .eq('is_system', false);
 
       const n = count ?? 0;
+      // Chime hanya saat ada pesan BARU (naik), bukan saat read (turun)
       if (n > prevChatCountRef.current && prevChatCountRef.current >= 0) playChime();
       prevChatCountRef.current = n;
       setChatBadgeCount(n);
 
-      // Hitung surat yang menunggu review PIC (pic_review_status = PENDING)
+      // Hitung surat yang menunggu review PIC (pic_review_status = PENDING, status = DONE)
       const { count: qCount } = await supabase
         .from('surat_registrasi')
         .select('id', { count: 'exact', head: true })
         .in('penggunaan_id', penggunaanIds)
-        .eq('pic_review_status', 'PENDING');
+        .eq('pic_review_status', 'PENDING')
+        .eq('status', 'DONE');
       setPicQueueCount(qCount ?? 0);
     };
 
     fetchChatBadge();
+
+    // ── Realtime: dengarkan INSERT pesan baru DAN UPDATE is_read ─────────────
+    // Dengan listen ke UPDATE, saat PIC mark read di MonitoringPICPage,
+    // sidebar langsung sync tanpa perlu window.dispatchEvent
     const ch = supabase.channel('sidebar-chat-badge')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_registrasi' }, fetchChatBadge)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surat_chats' }, fetchChatBadge)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'surat_registrasi',
+      }, fetchChatBadge)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'surat_chats',
+      }, fetchChatBadge)
+      .on('postgres_changes', {
+        // ← INI YANG FIX: saat is_read di-update jadi true, sidebar langsung re-fetch
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'surat_chats',
+      }, fetchChatBadge)
       .subscribe();
 
-    // Listen custom event dari PICReviewDetail saat pesan di-mark read
-    window.addEventListener('chat-read', fetchChatBadge);
+    // HAPUS window.addEventListener('chat-read') — tidak diperlukan lagi
+    // Sidebar sekarang sinkron murni via Supabase realtime
 
     return () => {
       supabase.removeChannel(ch);
-      window.removeEventListener('chat-read', fetchChatBadge);
     };
   }, [user?.id, isUserPIC]);
+
+  // ── Badge: pesan dari PIC belum dibaca (untuk pembuat/creator) ──────────────
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchCreatorBadge = async () => {
+      // Ambil surat yang dibuat oleh user ini
+      const { data: surats } = await supabase
+        .from('surat_registrasi')
+        .select('id')
+        .eq('created_by', user.id)
+        .eq('status', 'DONE');
+      if (!surats?.length) { setCreatorChatBadge(0); return; }
+      const suratIds = surats.map((s: any) => s.id);
+
+      // Hitung pesan dari PIC yang belum dibaca
+      const { count } = await supabase
+        .from('surat_chats')
+        .select('id', { count: 'exact', head: true })
+        .in('surat_id', suratIds)
+        .eq('sender_role', 'pic')
+        .eq('is_read', false)
+        .eq('is_system', false);
+
+      setCreatorChatBadge(count ?? 0);
+    };
+
+    fetchCreatorBadge();
+
+    // Hitung surat milik user yang menunggu review PIC (semua sign selesai, belum ada keputusan PIC)
+    const fetchMonitoringBadge = async () => {
+      const { data: surats } = await supabase
+        .from('surat_registrasi')
+        .select('id')
+        .eq('created_by', user.id)
+        .eq('status', 'DONE')
+        .is('pic_review_status', null);
+      setMonitoringBadge(surats?.length ?? 0);
+    };
+    fetchMonitoringBadge();
+
+    const ch = supabase.channel(`sidebar-creator-chat-badge:${user.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surat_chats' }, fetchCreatorBadge)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_chats' }, fetchCreatorBadge)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_registrasi' }, fetchMonitoringBadge)
+      .subscribe();
+
+    return () => { supabase.removeChannel(ch); };
+  }, [user?.id]);
 
   // ── Badge: antrean keuangan ───────────────────────────────────────────────
   useEffect(() => {
@@ -251,7 +353,6 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     };
 
     const fetchFinanceBadge = async () => {
-      // Hitung dari finance_reviews yang masih PENDING/IN_REVIEW
       const { count } = await supabase
         .from('finance_reviews')
         .select('id', { count: 'exact', head: true })
@@ -310,7 +411,6 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         >
           <div className="relative shrink-0">
             <Icon className={cn(isSubItem ? "w-4 h-4" : "w-5 h-5", isActive ? "text-primary" : "text-muted-foreground")} />
-            {/* Dot badge saat collapsed */}
             {collapsed && label === 'Persetujuan' && inboxCount > 0 && (
               <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 z-10">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -322,15 +422,19 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
           {!collapsed && (
             <div className="flex items-center justify-between w-full overflow-hidden">
               <span className={cn("font-medium truncate", isSubItem ? "text-[11px]" : "text-sm")}>{label}</span>
-              {/* Badge per item */}
               {label === 'Persetujuan' && inboxCount > 0 && (
                 <span className="ml-2 bg-red-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0">
                   {inboxCount > 99 ? '99+' : inboxCount}
                 </span>
               )}
-              {label === 'Diskusi PIC' && chatBadgeCount > 0 && (
-                <span className="ml-2 bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 animate-pulse">
-                  {chatBadgeCount > 99 ? '99+' : chatBadgeCount}
+              {label === 'Status Pengajuan' && monitoringBadge > 0 && (
+                <span className="ml-2 bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 animate-pulse">
+                  {monitoringBadge > 99 ? '99+' : monitoringBadge}
+                </span>
+              )}
+              {label === 'Diskusi PIC' && creatorChatBadge > 0 && (
+                <span className="ml-2 bg-primary text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 animate-pulse">
+                  {creatorChatBadge > 99 ? '99+' : creatorChatBadge}
                 </span>
               )}
               {label === 'Antrean Review PIC' && picQueueCount > 0 && (
@@ -399,8 +503,7 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <Mail className="w-5 h-5" />
-                  {/* Dot di icon saat collapsed — gabungan inbox + chat */}
-                  {collapsed && (inboxCount > 0 || chatBadgeCount > 0) && (
+                  {collapsed && (inboxCount > 0 || chatBadgeCount > 0 || creatorChatBadge > 0) && (
                     <span className="absolute -top-1 -right-1 flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
@@ -411,13 +514,11 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
               </div>
               {!collapsed && (
                 <div className="flex items-center gap-2">
-                  {/* Badge angka chat saat dropdown tertutup */}
-                  {chatBadgeCount > 0 && !isSuratOpen && (
-                    <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
-                      {chatBadgeCount > 99 ? '99+' : chatBadgeCount}
+                  {creatorChatBadge > 0 && !isSuratOpen && (
+                    <span className="bg-primary text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
+                      {creatorChatBadge > 99 ? '99+' : creatorChatBadge}
                     </span>
                   )}
-                  {/* Dot merah inbox saat dropdown tertutup */}
                   {inboxCount > 0 && !isSuratOpen && (
                     <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
                   )}
@@ -443,52 +544,6 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
             </AnimatePresence>
           </div>
         </div>
-
-        {/* Finance Section */}
-        {(isUserFinance || user?.role === 'admin') && (
-          <div className="space-y-1">
-            {!collapsed && <p className="px-3 text-[9px] font-black text-muted-foreground/40 uppercase tracking-[0.2em] mb-2">Keuangan</p>}
-            <div className="space-y-1">
-              <button
-                onClick={() => !collapsed && setIsFinanceOpen(!isFinanceOpen)}
-                className={cn(
-                  "w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors group",
-                  location.pathname.includes('/finance') ? "text-primary bg-primary/5" : "text-muted-foreground hover:bg-accent"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <Wallet className="w-5 h-5" />
-                    {collapsed && financeBadgeCount > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                      </span>
-                    )}
-                  </div>
-                  {!collapsed && <span className="text-sm font-medium">Tim Keuangan</span>}
-                </div>
-                {!collapsed && (
-                  <div className="flex items-center gap-2">
-                    {financeBadgeCount > 0 && !isFinanceOpen && (
-                      <span className="bg-blue-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
-                        {financeBadgeCount > 99 ? '99+' : financeBadgeCount}
-                      </span>
-                    )}
-                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-300", isFinanceOpen && "rotate-180")} />
-                  </div>
-                )}
-              </button>
-              <AnimatePresence>
-                {(isFinanceOpen && !collapsed) && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-0.5">
-                    {renderNavLink('/finance/review', 'Antrean Review', FileText, true)}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        )}
 
         {/* Admin Section */}
         {user?.role === 'admin' && (

@@ -10,8 +10,8 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { picService } from '@/services/pic.service';
-import { SuratItem, ReviewAction, ReviewState, Department } from './Types';
-import { getStatusBadge, StatusIcon, getFileUrl, uploadFile } from './Utils';
+import { SuratItem, ReviewAction, ReviewState, Department } from './types';
+import { getStatusBadge, StatusIcon, getFileUrl, uploadFile } from './utils';
 import { ReviewModal } from './ReviewModal';
 
 interface DepartmentQueueProps {
