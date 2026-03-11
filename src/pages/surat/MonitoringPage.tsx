@@ -19,6 +19,14 @@ import { PreviewModal } from "@/components/surat/PreviewModal";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+const getPaymentUrl = (path: string | null): string | null => {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  // path bisa: 'payment_files/xxx' atau 'payment-xxx'
+  const key = path.startsWith('payment_files/') ? path.slice('payment_files/'.length) : path;
+  return `https://xuhyodtmgwteyslhrkfx.supabase.co/storage/v1/object/public/payment_files/${key}`;
+};
+
 type DocStatus = 'PROSES' | 'SELESAI' | 'DITOLAK' | 'MENUNGGU_PIC' | 'KEUANGAN';
 
 interface ResolvedStatus {
@@ -139,7 +147,8 @@ const MonitoringPage = () => {
             surat_signatures (
               id, step_order, is_signed, status, role_name, signed_at,
               profiles:user_id ( full_name )
-            )
+            ),
+            finance_reviews ( payment_file_path, status )
           `)
           .eq('created_by', session.user.id)
           .order('created_at', { ascending: false }),
@@ -201,7 +210,9 @@ const MonitoringPage = () => {
       : picDepts.find((d: any) => d.code !== 'KEU' && !d.name?.toLowerCase().includes('keuangan')) ?? picDepts[0];
     const picDeptName = picDept?.name ?? null;
 
-    return { ...s, _sigs: sigs, _status: resolveStatus(s, sigs), _pic_name: picName, _pic_dept: picDeptName };
+    const paymentPath = (s.finance_reviews?.[0]?.payment_file_path) ?? null;
+    const paymentUrl = getPaymentUrl(paymentPath);
+    return { ...s, _sigs: sigs, _status: resolveStatus(s, sigs), _pic_name: picName, _pic_dept: picDeptName, _payment_url: paymentUrl };
   });
 
   const filtered = enriched.filter(s => {
@@ -538,6 +549,33 @@ const MonitoringPage = () => {
                     </span>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* BUKTI PEMBAYARAN */}
+            {selectedSurat?._payment_url && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Banknote size={14} />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Bukti Pembayaran</span>
+                </div>
+                <a
+                  href={selectedSurat._payment_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-3 p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                    <FileCheck size={16} className="text-emerald-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">Lihat Bukti Transaksi</p>
+                    <p className="text-[9px] text-muted-foreground truncate font-mono mt-0.5">
+                      {selectedSurat._payment_url.split('/').pop()}
+                    </p>
+                  </div>
+                  <ArrowUpRight size={14} className="text-emerald-400 shrink-0 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                </a>
               </div>
             )}
 

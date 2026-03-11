@@ -495,6 +495,16 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
                 <XCircle size={14} /> Tolak
               </button>
             </div>
+            {/* Toggle chat untuk PIC Keuangan */}
+            <button onClick={handleToggleChat} disabled={isTogglingChat}
+              className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all ${
+                isChatOpen
+                  ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+              }`}>
+              {isTogglingChat ? <Loader2 size={11} className="animate-spin" /> : isChatOpen
+                ? <><Lock size={11} /> Tutup Sesi Chat</> : <><LockOpen size={11} /> Buka Sesi Chat</>}
+            </button>
           </div>
         )}
 

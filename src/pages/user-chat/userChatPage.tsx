@@ -41,7 +41,8 @@ const getFileUrl = (path: string | null): string | null => {
   if (path.startsWith('http')) return path;
   const bucket =
     path.startsWith('spk_files/') ? 'spk_files' :
-    path.startsWith('payment_files/') ? 'spk_files' :
+    path.startsWith('payment_files/') ? 'payment_files' :
+    path.startsWith('payment-') ? 'payment_files' :       // path tanpa prefix folder
     path.startsWith('chat_attachments/') ? 'chat_attachments' :
     path.startsWith('lampiran_') ? 'lampiran_surat' :
     'dokumen_surat';
