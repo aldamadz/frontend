@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
-import { 
-  Download, FileUp, Hash, ArrowDown, Loader2, Briefcase, 
+import {
+  Download, FileUp, Hash, ArrowDown, Loader2, Briefcase,
   Check, ChevronDown, Paperclip, Copy, RefreshCcw, ChevronRight, Layers,
-  ShieldCheck, AlertTriangle
+  ShieldCheck, AlertTriangle, Archive, Home
 } from "lucide-react";
 import { suratService } from "@/services/surat.service";
 import { supabase } from "@/lib/supabase";
@@ -26,70 +26,46 @@ interface SuratFormProps {
 
 export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDisplay }: SuratFormProps) {
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef     = useRef<HTMLInputElement>(null);
   const lampiranInputRef = useRef<HTMLInputElement>(null);
 
-  // --- 1. STATE MANAGEMENT ---
-  const [master, setMaster] = useState<any>({
-    entities: [], depts: [], offices: [], types: [], users: [], projects: []
-  });
-
-  const [usageDetails, setUsageDetails] = useState<any[]>([]);
-  const [selectedUsage, setSelectedUsage] = useState<any>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [generatedNoSurat, setGeneratedNoSurat] = useState<string | null>(null);
+  // ── STATE ──────────────────────────────────────────────────────────────────
+  const [master, setMaster] = useState<any>({ entities: [], depts: [], offices: [], types: [], users: [], projects: [] });
+  const [usageDetails, setUsageDetails]           = useState<any[]>([]);
+  const [selectedUsage, setSelectedUsage]         = useState<any>(null);
+  const [file, setFile]                           = useState<File | null>(null);
+  const [generatedNoSurat, setGeneratedNoSurat]   = useState<string | null>(null);
   const [isProcessingNumber, setIsProcessingNumber] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [openMatrix, setOpenMatrix] = useState(false);
-  const [lampiranFile, setLampiranFile] = useState<File | null>(null);
-
+  const [isCopied, setIsCopied]                   = useState(false);
+  const [isDownloading, setIsDownloading]         = useState(false);
+  const [openMatrix, setOpenMatrix]               = useState(false);
+  const [lampiranFile, setLampiranFile]           = useState<File | null>(null);
   const [formData, setFormData] = useState({
-    entity_id: "",
-    dept_id: "",
-    letter_type_id: "",
-    office_id: "",
-    project_id: "",
-    judul_surat: "",
-    penggunaan_id: "",
-    is_aset: false 
+    entity_id: "", dept_id: "", letter_type_id: "",
+    office_id: "", project_id: "", judul_surat: "",
+    penggunaan_id: "", is_aset: false
   });
-
   const [signers, setSigners] = useState<any[]>([]);
 
-  // --- 2. HELPERS (Didefinisikan di awal untuk mencegah ReferenceError) ---
+  // ── HELPERS ────────────────────────────────────────────────────────────────
   const getFullRoles = (item: any) => {
-    if (!item || !item.ttd_config) return [];
+    if (!item?.ttd_config) return [];
     try {
-      const config = typeof item.ttd_config === 'string' 
-        ? JSON.parse(item.ttd_config) 
-        : item.ttd_config;
-
-      return Array.isArray(config) 
-        ? config.map((c: any) => c.labelJabatan || c.jabatan || c.roleName) 
-        : [];
-    } catch (e) {
-      return [];
-    }
+      const config = typeof item.ttd_config === "string" ? JSON.parse(item.ttd_config) : item.ttd_config;
+      return Array.isArray(config) ? config.map((c: any) => c.labelJabatan || c.jabatan || c.roleName) : [];
+    } catch { return []; }
   };
 
-  const officePusat = useMemo(() => master.offices?.find((o: any) => o.kedudukan === 'Pusat'), [master.offices]);
+  const officePusat     = useMemo(() => master.offices?.find((o: any) => o.kedudukan === "Pusat"), [master.offices]);
   const isPusatSelected = useMemo(() => formData.office_id === officePusat?.id, [formData.office_id, officePusat]);
 
-  // --- 3. FILTERING & DERIVED STATE ---
-  const filteredUsage = useMemo(() => {
-    return usageDetails.filter(item => item.is_cabang === !isPusatSelected);
-  }, [usageDetails, isPusatSelected]);
+  const filteredUsage = useMemo(() => usageDetails.filter(i => i.is_cabang === !isPusatSelected), [usageDetails, isPusatSelected]);
 
   const groupedUsage = useMemo(() => {
-    const groups: { [key: number]: any[] } = {};
+    const groups: { [k: number]: any[] } = {};
     filteredUsage.forEach(item => {
-      const roles = getFullRoles(item);
-      const level = roles.length;
-      if (level > 0) {
-        if (!groups[level]) groups[level] = [];
-        groups[level].push(item);
-      }
+      const level = getFullRoles(item).length;
+      if (level > 0) { if (!groups[level]) groups[level] = []; groups[level].push(item); }
     });
     return groups;
   }, [filteredUsage]);
@@ -107,98 +83,62 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     return master.projects.filter((p: any) => p.office_id === formData.office_id);
   }, [master.projects, formData.office_id, isPusatSelected]);
 
-  const isDirty = useMemo(() => {
-    return !!generatedNoSurat || !!file || formData.judul_surat.length > 0;
-  }, [generatedNoSurat, file, formData.judul_surat]);
+  const isDirty = useMemo(() => !!generatedNoSurat || !!file || formData.judul_surat.length > 0, [generatedNoSurat, file, formData.judul_surat]);
 
-  // --- 4. EFFECTS ---
+  // ── EFFECTS ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
-        e.preventDefault();
-        e.returnValue = "Nomor surat telah dipesan. Yakin ingin meninggalkan halaman?"; 
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    const h = (e: BeforeUnloadEvent) => { if (isDirty) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
   }, [isDirty]);
 
   useEffect(() => {
-    const fetchInitialData = async () => {
-      try {
-        const data = await suratService.getMasterData();
-        setMaster(data);
-        const p = data.offices?.find((o: any) => o.kedudukan === 'Pusat');
-        if (p) setFormData(prev => ({ ...prev, office_id: p.id }));
-      } catch (error) {
-        toast({ variant: "destructive", title: "Gagal memuat data master" });
-      }
-    };
-    fetchInitialData();
+    suratService.getMasterData().then(data => {
+      setMaster(data);
+      const p = data.offices?.find((o: any) => o.kedudukan === "Pusat");
+      if (p) setFormData(prev => ({ ...prev, office_id: p.id }));
+    }).catch(() => toast({ variant: "destructive", title: "Gagal memuat data master" }));
   }, [toast]);
 
   useEffect(() => {
-    const fetchUsageGlobal = async () => {
-      const { data, error } = await supabase
-        .from('master_penggunaan_detail')
-        .select(`*, master_forms!fk_master_forms (id, nama_form, nomor_form, link_form, department_id)`)
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        toast({ variant: "destructive", title: "Gagal memuat penggunaan", description: error.message });
-      } else {
-        setUsageDetails(data || []);
-      }
-    };
-    fetchUsageGlobal();
+    supabase.from("master_penggunaan_detail")
+      .select(`*, master_forms!fk_master_forms (id, nama_form, nomor_form, link_form, department_id)`)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) toast({ variant: "destructive", title: "Gagal memuat penggunaan", description: error.message });
+        else setUsageDetails(data || []);
+      });
   }, [toast]);
 
   useEffect(() => {
-    if (!generatedNoSurat) {
-        setSelectedUsage(null);
-        setFormData(prev => ({ ...prev, penggunaan_id: "" }));
-        setSigners([]);
-    }
+    if (!generatedNoSurat) { setSelectedUsage(null); setFormData(prev => ({ ...prev, penggunaan_id: "" })); setSigners([]); }
   }, [isPusatSelected, generatedNoSurat]);
 
-  // --- 5. HANDLERS ---
+  // ── HANDLERS ───────────────────────────────────────────────────────────────
   const handleProjectChange = (projectId: string) => {
-    const selectedProject = master.projects?.find((p: any) => p.id === projectId);
-    setFormData(prev => ({
-      ...prev,
-      project_id: projectId,
-      entity_id: selectedProject?.entity_id || prev.entity_id 
-    }));
+    const proj = master.projects?.find((p: any) => p.id === projectId);
+    setFormData(prev => ({ ...prev, project_id: projectId, entity_id: proj?.entity_id || prev.entity_id }));
   };
 
   const handleUsageChange = (val: string) => {
     const detail = usageDetails.find(u => u.id === val);
-    if (detail) {
-      setSelectedUsage(detail);
-      setFormData(prev => ({ ...prev, penggunaan_id: val }));
-      try {
-        const config = typeof detail.ttd_config === 'string' 
-          ? JSON.parse(detail.ttd_config) 
-          : detail.ttd_config;
-
-        if (Array.isArray(config)) {
-          setSigners(config.map((c: any, i: number) => ({
-            role_name: c.roleName || c.role_name, 
-            label_jabatan: c.labelJabatan || c.label_jabatan || c.jabatan,
-            user_id: "", 
-            step_order: i + 1 
-          })));
-        }
-      } catch (e) {
-        toast({ variant: "destructive", title: "Format Alur Salah", description: "Cek kolom ttd_config di database." });
+    if (!detail) return;
+    setSelectedUsage(detail);
+    setFormData(prev => ({ ...prev, penggunaan_id: val }));
+    try {
+      const config = typeof detail.ttd_config === "string" ? JSON.parse(detail.ttd_config) : detail.ttd_config;
+      if (Array.isArray(config)) {
+        setSigners(config.map((c: any, i: number) => ({
+          role_name: c.roleName || c.role_name, label_jabatan: c.labelJabatan || c.label_jabatan || c.jabatan,
+          user_id: "", step_order: i + 1
+        })));
       }
-    }
+    } catch { toast({ variant: "destructive", title: "Format Alur Salah" }); }
   };
 
   const handleGetNumber = async () => {
-    if (!isPusatSelected && !formData.project_id) {
-        return toast({ variant: "destructive", title: "Proyek Belum Dipilih", description: "Pilih proyek cabang terlebih dahulu." });
-    }
+    if (!isPusatSelected && !formData.project_id)
+      return toast({ variant: "destructive", title: "Proyek Belum Dipilih" });
     setIsProcessingNumber(true);
     try {
       const res = await suratService.generateNoSurat(formData);
@@ -210,17 +150,13 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
   };
 
   const handleResetNumber = async () => {
-    if (generatedNoSurat) {
-      if (window.confirm("Membatalkan nomor ini akan mengosongkan antrian nomor. Lanjutkan?")) {
-        try {
-          await suratService.cancelRegistration(generatedNoSurat);
-          setGeneratedNoSurat(null);
-          toast({ title: "Nomor Dibatalkan" });
-        } catch (error) {
-          toast({ variant: "destructive", title: "Gagal membatalkan nomor" });
-        }
-      }
-    }
+    if (!generatedNoSurat) return;
+    if (!window.confirm("Membatalkan nomor ini akan mengosongkan antrian nomor. Lanjutkan?")) return;
+    try {
+      await suratService.cancelRegistration(generatedNoSurat);
+      setGeneratedNoSurat(null);
+      toast({ title: "Nomor Dibatalkan" });
+    } catch { toast({ variant: "destructive", title: "Gagal membatalkan nomor" }); }
   };
 
   const handleDownloadTemplate = async () => {
@@ -228,22 +164,13 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     setIsDownloading(true);
     try {
       await suratService.downloadFilledTemplate({ ...formData, no_surat: generatedNoSurat }, selectedUsage.master_forms.link_form);
-    } catch (error) {
-      toast({ variant: "destructive", title: "Gagal Mengunduh" });
-    } finally { setIsDownloading(false); }
+    } catch { toast({ variant: "destructive", title: "Gagal Mengunduh" }); }
+    finally { setIsDownloading(false); }
   };
 
   const resetForm = () => {
-    setFormData({
-      entity_id: "", dept_id: "", letter_type_id: "",
-      office_id: officePusat?.id || "", project_id: "",
-      judul_surat: "", penggunaan_id: "", is_aset: false
-    });
-    setGeneratedNoSurat(null);
-    setSelectedUsage(null);
-    setFile(null);
-    setLampiranFile(null);
-    setSigners([]);
+    setFormData({ entity_id: "", dept_id: "", letter_type_id: "", office_id: officePusat?.id || "", project_id: "", judul_surat: "", penggunaan_id: "", is_aset: false });
+    setGeneratedNoSurat(null); setSelectedUsage(null); setFile(null); setLampiranFile(null); setSigners([]);
     setJudulForDisplay("");
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (lampiranInputRef.current) lampiranInputRef.current.value = "";
@@ -252,11 +179,9 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
   const handleSubmit = async () => {
     if (!file) return toast({ variant: "destructive", title: "File Utama Wajib Diunggah" });
     if (signers.some(s => !s.user_id)) return toast({ variant: "destructive", title: "Pejabat Belum Lengkap" });
-    
     setIsLoading(true);
     try {
-      const payload = { ...formData, no_surat: generatedNoSurat };
-      const result = await suratService.createRegistrasi(payload, signers, file, lampiranFile); 
+      const result = await suratService.createRegistrasi({ ...formData, no_surat: generatedNoSurat }, signers, file, lampiranFile);
       if (result) {
         toast({ title: "Pendaftaran Berhasil", description: `Nomor ${result.no_surat} telah disimpan.` });
         onSuccess(result.no_surat, formData.judul_surat);
@@ -267,170 +192,225 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     } finally { setIsLoading(false); }
   };
 
+  // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <Card className="glass-card border-none overflow-hidden shadow-2xl bg-background/50 backdrop-blur-xl">
       <CardHeader className="bg-gradient-to-r from-primary/10 via-transparent to-transparent border-b border-border/50">
-        <CardTitle className="text-xl font-black flex items-center justify-between tracking-tight uppercase">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-primary/20 rounded-xl shadow-inner">
-              <Layers className="w-5 h-5 text-primary" />
-            </div>
-            Registrasi Dokumen Digital
+        <CardTitle className="text-xl font-black flex items-center gap-3 tracking-tight uppercase">
+          <div className="p-2.5 bg-primary/20 rounded-xl shadow-inner">
+            <Layers className="w-5 h-5 text-primary" />
           </div>
-          
-          <div className={cn(
-            "flex items-center gap-3 px-4 py-2 rounded-2xl border transition-all duration-300",
-            formData.is_aset ? "bg-amber-500/10 border-amber-500/50" : "bg-muted/30 border-transparent"
-          )}>
-            <div className="flex flex-col items-end">
-                <Label htmlFor="is_aset" className="text-[10px] font-black uppercase text-muted-foreground leading-none">Dokumen Aset</Label>
-                <span className="text-[9px] font-medium opacity-60 leading-tight">Property/Legal</span>
-            </div>
-            <Switch 
-                id="is_aset" 
-                checked={formData.is_aset} 
-                onCheckedChange={(val) => setFormData({...formData, is_aset: val})} 
-                className="data-[state=checked]:bg-amber-500"
-            />
-          </div>
+          Registrasi Dokumen Digital
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="p-6 md:p-10 space-y-12">
+      <CardContent className="p-6 md:p-10 space-y-8">
+
+        {/* ── PERINGATAN nomor sudah dipesan ───────────────────────────────── */}
         {generatedNoSurat && (
           <div className="animate-in fade-in zoom-in-95 duration-300">
-            <div className="bg-destructive/10 border border-destructive/20 p-4 rounded-2xl flex items-center gap-4 text-destructive shadow-sm">
-              <div className="p-2 bg-destructive rounded-lg text-white">
+            <div className="bg-destructive/10 border border-destructive/20 p-4 rounded-2xl flex items-center gap-4 text-destructive">
+              <div className="p-2 bg-destructive rounded-lg text-white shrink-0">
                 <AlertTriangle className="w-5 h-5 animate-bounce" />
               </div>
               <div>
                 <p className="text-xs font-black uppercase tracking-tight leading-none mb-1">Peringatan Keamanan Data</p>
-                <p className="text-[10px] font-medium opacity-80 leading-tight">
-                  Nomor surat telah dipesan. Jangan refresh halaman sebelum klik <b>Konfirmasi Pendaftaran</b> agar nomor tidak hangus.
+                <p className="text-[10px] font-medium opacity-80">
+                  Nomor surat telah dipesan. Jangan refresh sebelum klik <b>Konfirmasi Pendaftaran</b>.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* SECTION 1: LOKASI */}
+        {/* ══ SECTION 1: LOKASI & KLASIFIKASI ══════════════════════════════ */}
         <section className="space-y-6">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black shadow-lg">1</span>
-                <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Lokasi & Klasifikasi</h3>
-            </div>
-            {formData.is_aset && (
-                <div className="flex items-center gap-2 animate-pulse">
-                    <ShieldCheck className="w-4 h-4 text-amber-500" />
-                    <span className="text-[10px] font-black text-amber-500 uppercase tracking-tighter">Penanganan Aset Aktif</span>
-                </div>
-            )}
+          <div className="flex items-center gap-4">
+            <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black shadow-lg">1</span>
+            <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Lokasi & Klasifikasi</h3>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 rounded-3xl bg-muted/30 border border-border/50">
+            {/* Kantor */}
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase text-muted-foreground ml-1">Kantor Penerbit</Label>
-              <Select 
-                disabled={!!generatedNoSurat} 
-                value={formData.office_id} 
-                onValueChange={(v) => setFormData({...formData, office_id: v, project_id: "", dept_id: "", entity_id: ""})}
-              >
+              <Select disabled={!!generatedNoSurat} value={formData.office_id}
+                onValueChange={v => setFormData({ ...formData, office_id: v, project_id: "", dept_id: "", entity_id: "" })}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border">
                   <SelectValue placeholder="Pilih Kantor..." />
                 </SelectTrigger>
                 <SelectContent>
                   {master.offices?.map((o: any) => (
                     <SelectItem key={o.id} value={o.id}>
-                      {o.kedudukan === 'Pusat' ? "🏢 Kantor Pusat" : `🏗️ ${o.kedudukan}. ${o.name}`}
+                      {o.kedudukan === "Pusat" ? "🏢 Kantor Pusat" : `🏗️ ${o.kedudukan}. ${o.name}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Proyek (cabang saja) */}
             {!isPusatSelected && formData.office_id && (
               <div className="space-y-2 animate-in slide-in-from-top-2">
                 <Label className="text-[11px] font-black uppercase text-primary ml-1 flex items-center gap-2">
                   <Briefcase className="w-3 h-3" /> Pilih Proyek Cabang
                 </Label>
-                <Select 
-                  disabled={!!generatedNoSurat} 
-                  value={formData.project_id} 
-                  onValueChange={handleProjectChange}
-                >
+                <Select disabled={!!generatedNoSurat} value={formData.project_id} onValueChange={handleProjectChange}>
                   <SelectTrigger className="h-11 border-primary/40 bg-primary/5">
                     <SelectValue placeholder="Pilih Proyek..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {filteredProjects.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>)}
+                    {filteredProjects.map((p: any) => (
+                      <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             )}
 
+            {/* Entitas */}
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase text-muted-foreground ml-1">Entitas (PT)</Label>
-              <Select 
-                disabled={!!generatedNoSurat} 
-                value={formData.entity_id} 
-                onValueChange={(v) => setFormData({...formData, entity_id: v})}
-              >
+              <Select disabled={!!generatedNoSurat} value={formData.entity_id}
+                onValueChange={v => setFormData({ ...formData, entity_id: v })}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border">
                   <SelectValue placeholder="Pilih PT..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {master.entities?.map((e: any) => <SelectItem key={e.id} value={e.id}>{e.code} - {e.name}</SelectItem>)}
+                  {master.entities?.map((e: any) => (
+                    <SelectItem key={e.id} value={e.id}>{e.code} - {e.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Departemen */}
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase text-muted-foreground ml-1">Departemen</Label>
-              <Select disabled={!!generatedNoSurat} value={formData.dept_id} onValueChange={(v) => setFormData({...formData, dept_id: v})}>
+              <Select disabled={!!generatedNoSurat} value={formData.dept_id}
+                onValueChange={v => setFormData({ ...formData, dept_id: v })}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border">
                   <SelectValue placeholder="Pilih Dept..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {filteredDepts.map((d: any) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                  {filteredDepts.map((d: any) => (
+                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Jenis Dokumen */}
             <div className="space-y-2">
               <Label className="text-[11px] font-black uppercase text-muted-foreground ml-1">Jenis Dokumen</Label>
-              <Select disabled={!!generatedNoSurat} value={formData.letter_type_id} onValueChange={(v) => setFormData({...formData, letter_type_id: v})}>
+              <Select disabled={!!generatedNoSurat} value={formData.letter_type_id}
+                onValueChange={v => setFormData({ ...formData, letter_type_id: v })}>
                 <SelectTrigger className="h-11 bg-background/50 border-none ring-1 ring-border">
                   <SelectValue placeholder="Pilih Jenis..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {master.types?.map((t: any) => <SelectItem key={t.id} value={t.id}>{t.code} - {t.name}</SelectItem>)}
+                  {master.types?.map((t: any) => (
+                    <SelectItem key={t.id} value={t.id}>{t.code} - {t.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {!generatedNoSurat ? (
-            <Button 
-                onClick={handleGetNumber} 
-                disabled={isProcessingNumber || !formData.entity_id || !formData.dept_id || !formData.letter_type_id} 
-                className="w-full h-14 bg-primary text-white font-black rounded-2xl transition-all active:scale-[0.98] shadow-lg shadow-primary/20"
+          {/* ══ TOGGLE ASET — posisi baru, MENCOLOK, tepat sebelum tombol nomor ══ */}
+          {!generatedNoSurat && (
+            <div
+              role="button"
+              onClick={() => setFormData(f => ({ ...f, is_aset: !f.is_aset }))}
+              className={cn(
+                "relative overflow-hidden rounded-2xl border-2 p-5 transition-all duration-300 cursor-pointer select-none group",
+                formData.is_aset
+                  ? "bg-amber-500/10 border-amber-500 shadow-lg shadow-amber-500/15"
+                  : "bg-muted/20 border-dashed border-muted-foreground/30 hover:border-amber-500/50 hover:bg-amber-500/5"
+              )}
             >
-              {isProcessingNumber ? <Loader2 className="animate-spin mr-2" /> : <><Hash className="w-5 h-5 mr-2" /> DAPATKAN NOMOR SURAT</>}
+              {/* Animated glow saat aktif */}
+              {formData.is_aset && (
+                <div className="absolute inset-0 bg-gradient-to-r from-amber-500/8 via-transparent to-amber-400/5 pointer-events-none" />
+              )}
+
+              <div className="relative flex items-center justify-between gap-4">
+                {/* Ikon + teks */}
+                <div className="flex items-center gap-4">
+                  <div className={cn(
+                    "p-3 rounded-xl transition-all duration-200 shadow-sm",
+                    formData.is_aset
+                      ? "bg-amber-500 text-white shadow-amber-500/30"
+                      : "bg-background text-muted-foreground group-hover:bg-amber-500/10 group-hover:text-amber-500"
+                  )}>
+                    {formData.is_aset ? <Archive className="w-5 h-5" /> : <Home className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <p className={cn(
+                      "font-black uppercase tracking-tight text-sm transition-colors",
+                      formData.is_aset ? "text-amber-600 dark:text-amber-400" : "text-foreground group-hover:text-amber-600"
+                    )}>
+                      {formData.is_aset ? "✦ Dokumen Aset — Aktif" : "Tandai sebagai Dokumen Aset"}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                      {formData.is_aset
+                        ? "Kolom B4 pada template akan dicentang otomatis sebagai penanda aset"
+                        : "Properti · Kendaraan · Inventaris Legal — klik untuk mengaktifkan"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Switch */}
+                <Switch
+                  checked={formData.is_aset}
+                  onCheckedChange={val => setFormData(f => ({ ...f, is_aset: val }))}
+                  onClick={e => e.stopPropagation()}
+                  className="data-[state=checked]:bg-amber-500 shrink-0 scale-110"
+                />
+              </div>
+
+              {/* Badge konfirmasi saat aktif */}
+              {formData.is_aset && (
+                <div className="relative mt-3 pt-3 border-t border-amber-500/20 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                    Surat ini ditandai sebagai dokumen aset &amp; akan diproses sesuai alur properti
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Tombol dapatkan nomor / tampilan nomor ────────────────────── */}
+          {!generatedNoSurat ? (
+            <Button
+              onClick={handleGetNumber}
+              disabled={isProcessingNumber || !formData.entity_id || !formData.dept_id || !formData.letter_type_id}
+              className="w-full h-14 bg-primary text-white font-black rounded-2xl transition-all active:scale-[0.98] shadow-lg shadow-primary/20"
+            >
+              {isProcessingNumber
+                ? <Loader2 className="animate-spin mr-2 w-5 h-5" />
+                : <><Hash className="w-5 h-5 mr-2" /> DAPATKAN NOMOR SURAT</>
+              }
             </Button>
           ) : (
-            <div className="p-6 rounded-3xl bg-primary/10 border-2 border-primary/20 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="p-5 rounded-3xl bg-primary/10 border-2 border-primary/20 flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex gap-4 items-center">
                 <div className="p-3 bg-primary rounded-2xl text-primary-foreground shadow-lg"><Hash className="w-6 h-6" /></div>
                 <div>
-                  <p className="text-[10px] font-black text-primary uppercase">Nomor Terdaftar</p>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <p className="text-[10px] font-black text-primary uppercase">Nomor Terdaftar</p>
+                    {formData.is_aset && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded-full">
+                        <Archive className="w-3 h-3 text-amber-500" />
+                        <span className="text-[9px] font-black text-amber-500 uppercase">Aset</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3">
                     <p className="text-2xl font-black tracking-tighter">{generatedNoSurat}</p>
-                    <Button variant="outline" size="icon" onClick={() => {
-                        navigator.clipboard.writeText(generatedNoSurat || "");
-                        setIsCopied(true);
-                        setTimeout(() => setIsCopied(false), 2000);
-                    }} className="h-8 w-8">
+                    <Button variant="outline" size="icon" className="h-8 w-8"
+                      onClick={() => { navigator.clipboard.writeText(generatedNoSurat || ""); setIsCopied(true); setTimeout(() => setIsCopied(false), 2000); }}>
                       {isCopied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
                     </Button>
                   </div>
@@ -443,9 +423,9 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
           )}
         </section>
 
-        {/* SECTION 2: BERKAS */}
+        {/* ══ SECTION 2: BERKAS ════════════════════════════════════════════ */}
         {generatedNoSurat && (
-          <div className="space-y-12 animate-in slide-in-from-bottom-5 duration-500">
+          <div className="space-y-8 animate-in slide-in-from-bottom-5 duration-500">
             <section className="space-y-6">
               <div className="flex items-center gap-4">
                 <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black">2</span>
@@ -453,16 +433,19 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Kiri: matrix + judul + template */}
                 <div className="space-y-6">
                   <div className="space-y-2">
-                    <Label className="text-[11px] font-black uppercase text-muted-foreground">Pilih Matrix Alur ({isPusatSelected ? 'Pusat' : 'Cabang'})</Label>
+                    <Label className="text-[11px] font-black uppercase text-muted-foreground">
+                      Pilih Matrix Alur ({isPusatSelected ? "Pusat" : "Cabang"})
+                    </Label>
                     <Popover open={openMatrix} onOpenChange={setOpenMatrix}>
                       <PopoverTrigger asChild>
                         <Button variant="outline" className="w-full h-auto py-3 justify-between rounded-xl ring-1 ring-border bg-muted/20 hover:bg-muted/30">
                           <div className="truncate text-left">
                             {selectedUsage ? (
                               <div className="flex items-center gap-1 flex-wrap">
-                                {getFullRoles(selectedUsage).map((role, idx, arr) => (
+                                {getFullRoles(selectedUsage).map((role: string, idx: number, arr: string[]) => (
                                   <React.Fragment key={idx}>
                                     <span className="text-xs font-black uppercase">{role}</span>
                                     {idx < arr.length - 1 && <ChevronRight className="w-3 h-3 opacity-30" />}
@@ -479,12 +462,12 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                           <CommandInput placeholder="Cari alur..." />
                           <CommandList className="max-h-[300px]">
                             <CommandEmpty>Alur tidak ditemukan.</CommandEmpty>
-                            {Object.keys(groupedUsage).sort((a,b) => parseInt(a)-parseInt(b)).map((level) => (
+                            {Object.keys(groupedUsage).sort((a, b) => parseInt(a) - parseInt(b)).map(level => (
                               <CommandGroup key={level} heading={`ALUR ${level} TAHAP`}>
                                 {groupedUsage[parseInt(level)].map((u: any) => (
                                   <CommandItem key={u.id} onSelect={() => { handleUsageChange(u.id); setOpenMatrix(false); }} className="p-3 cursor-pointer">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      {getFullRoles(u).map((role, idx, arr) => (
+                                      {getFullRoles(u).map((role: string, idx: number, arr: string[]) => (
                                         <React.Fragment key={idx}>
                                           <span className="text-[10px] px-2 py-0.5 bg-muted rounded-md font-black uppercase">{role}</span>
                                           {idx < arr.length - 1 && <ChevronRight className="w-3 h-3 opacity-30" />}
@@ -503,51 +486,63 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
 
                   <div className="space-y-2">
                     <Label className="text-[11px] font-black uppercase text-muted-foreground">Perihal (Judul Surat)</Label>
-                    <Input 
-                        className="h-12 bg-muted/20 border-none ring-1 ring-border focus-visible:ring-primary" 
-                        placeholder="Contoh: Permohonan Pembelian Inventaris Kantor" 
-                        value={formData.judul_surat} 
-                        onChange={(e) => { 
-                            setFormData({...formData, judul_surat: e.target.value}); 
-                            setJudulForDisplay(e.target.value); 
-                        }} 
+                    <Input className="h-12 bg-muted/20 border-none ring-1 ring-border focus-visible:ring-primary"
+                      placeholder="Contoh: Permohonan Pembelian Inventaris Kantor"
+                      value={formData.judul_surat}
+                      onChange={e => { setFormData({ ...formData, judul_surat: e.target.value }); setJudulForDisplay(e.target.value); }}
                     />
                   </div>
 
                   {selectedUsage?.master_forms?.link_form && (
-                    <Button variant="secondary" className="w-full h-11 rounded-xl font-black text-xs gap-2" onClick={handleDownloadTemplate} disabled={isDownloading}>
-                      {isDownloading ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />} UNDUH TEMPLATE
+                    <Button variant="secondary" className="w-full h-11 rounded-xl font-black text-xs gap-2"
+                      onClick={handleDownloadTemplate} disabled={isDownloading}>
+                      {isDownloading ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
+                      UNDUH TEMPLATE
                     </Button>
                   )}
                 </div>
 
+                {/* Kanan: upload */}
                 <div className="space-y-4">
-                  <div className={cn("relative border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center min-h-[160px] transition-all", file ? "border-primary bg-primary/5" : "border-muted-foreground/20 bg-muted/10 hover:bg-muted/20")}>
-                    <input type="file" ref={fileInputRef} accept=".xlsx" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-                    <div className={cn("p-4 rounded-2xl mb-2", file ? "bg-primary text-white" : "bg-background text-muted-foreground shadow-sm")}><FileUp className="w-6 h-6" /></div>
+                  <div className={cn(
+                    "relative border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center min-h-[160px] transition-all",
+                    file ? "border-primary bg-primary/5" : "border-muted-foreground/20 bg-muted/10 hover:bg-muted/20"
+                  )}>
+                    <input type="file" ref={fileInputRef} accept=".xlsx" className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                      onChange={e => setFile(e.target.files?.[0] || null)} />
+                    <div className={cn("p-4 rounded-2xl mb-2", file ? "bg-primary text-white" : "bg-background text-muted-foreground shadow-sm")}>
+                      <FileUp className="w-6 h-6" />
+                    </div>
                     <p className="font-black text-xs text-center max-w-[200px] truncate">{file ? file.name : "Unggah File Utama (.xlsx)"}</p>
                     {!file && <p className="text-[10px] opacity-60 mt-1">Format Excel wajib sesuai template</p>}
                   </div>
 
-                  <div className={cn("relative border-2 border-dashed rounded-2xl p-5 flex items-center gap-4 transition-all", lampiranFile ? "border-emerald-500 bg-emerald-500/5" : "border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10")}>
-                    <input type="file" ref={lampiranInputRef} className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => setLampiranFile(e.target.files?.[0] || null)} />
-                    <div className={cn("p-3 rounded-xl", lampiranFile ? "bg-emerald-500 text-white" : "bg-amber-500 text-white shadow-sm")}><Paperclip className="w-5 h-5" /></div>
+                  <div className={cn(
+                    "relative border-2 border-dashed rounded-2xl p-5 flex items-center gap-4 transition-all",
+                    lampiranFile ? "border-emerald-500 bg-emerald-500/5" : "border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10"
+                  )}>
+                    <input type="file" ref={lampiranInputRef} className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                      onChange={e => setLampiranFile(e.target.files?.[0] || null)} />
+                    <div className={cn("p-3 rounded-xl", lampiranFile ? "bg-emerald-500 text-white" : "bg-amber-500 text-white")}>
+                      <Paperclip className="w-5 h-5" />
+                    </div>
                     <div className="text-left flex-1 min-w-0">
                       <p className="text-[10px] font-black uppercase text-muted-foreground">Lampiran Tambahan (Opsional)</p>
-                      <p className="text-xs font-bold truncate">{lampiranFile ? lampiranFile.name : `Klik untuk unggah PDF/Gambar`}</p>
+                      <p className="text-xs font-bold truncate">{lampiranFile ? lampiranFile.name : "Klik untuk unggah PDF/Gambar"}</p>
                     </div>
                   </div>
                 </div>
               </div>
             </section>
 
-            {/* SECTION 3: SIGNERS */}
+            {/* ══ SECTION 3: SIGNERS ═══════════════════════════════════════ */}
             {signers.length > 0 && file && (
               <section className="space-y-8 pt-10 border-t animate-in fade-in duration-700">
                 <div className="flex items-center gap-4">
                   <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black">3</span>
                   <h3 className="text-sm font-black uppercase text-muted-foreground">Penetapan Pejabat Penandatangan</h3>
                 </div>
+
                 <div className="max-w-xl mx-auto space-y-4">
                   {signers.map((s, i) => (
                     <div key={i} className="flex flex-col items-center">
@@ -557,19 +552,10 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                         </div>
                         <div className="flex-1 text-left space-y-1">
                           <div className="flex flex-col mb-2">
-                            <p className="text-xs font-black text-primary uppercase leading-tight">
-                              {s.label_jabatan} 
-                            </p>
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter">
-                              Status: {s.role_name}
-                            </p>
+                            <p className="text-xs font-black text-primary uppercase leading-tight">{s.label_jabatan}</p>
+                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter">Status: {s.role_name}</p>
                           </div>
-
-                          <Select value={s.user_id} onValueChange={(val) => {
-                            const newS = [...signers];
-                            newS[i].user_id = val;
-                            setSigners(newS);
-                          }}>
+                          <Select value={s.user_id} onValueChange={val => { const ns = [...signers]; ns[i].user_id = val; setSigners(ns); }}>
                             <SelectTrigger className="h-10 bg-muted/20 border-none ring-1 ring-border rounded-lg focus:ring-primary">
                               <SelectValue placeholder={`Pilih ${s.label_jabatan}...`} />
                             </SelectTrigger>
@@ -585,23 +571,21 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
                     </div>
                   ))}
                 </div>
-                
+
                 <div className="pt-6">
-                    <Button 
-                        className="w-full h-16 bg-primary text-white text-lg font-black rounded-3xl shadow-glow transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50" 
-                        disabled={isLoading || signers.some(s => !s.user_id) || !formData.judul_surat} 
-                        onClick={handleSubmit}
-                    >
-                        {isLoading ? (
-                            <div className="flex items-center gap-3">
-                                <Loader2 className="animate-spin w-6 h-6" />
-                                <span>MEMPROSES DATA...</span>
-                            </div>
-                        ) : "KONFIRMASI PENDAFTARAN"}
-                    </Button>
-                    <p className="text-center text-[10px] text-muted-foreground mt-4 font-medium uppercase tracking-widest">
-                        Pastikan semua data sudah benar sebelum konfirmasi
-                    </p>
+                  <Button
+                    className="w-full h-16 bg-primary text-white text-lg font-black rounded-3xl shadow-glow transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                    disabled={isLoading || signers.some(s => !s.user_id) || !formData.judul_surat}
+                    onClick={handleSubmit}
+                  >
+                    {isLoading
+                      ? <div className="flex items-center gap-3"><Loader2 className="animate-spin w-6 h-6" /><span>MEMPROSES DATA...</span></div>
+                      : "KONFIRMASI PENDAFTARAN"
+                    }
+                  </Button>
+                  <p className="text-center text-[10px] text-muted-foreground mt-4 font-medium uppercase tracking-widest">
+                    Pastikan semua data sudah benar sebelum konfirmasi
+                  </p>
                 </div>
               </section>
             )}
@@ -611,3 +595,5 @@ export function SuratForm({ onSuccess, isLoading, setIsLoading, setJudulForDispl
     </Card>
   );
 }
+
+export default SuratForm;

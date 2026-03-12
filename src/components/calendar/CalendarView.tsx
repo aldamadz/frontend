@@ -1,7 +1,8 @@
+// src/components/calendar/CalendarView.tsx
 import { useState, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { 
-  format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, 
+import {
+  format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameMonth, isSameDay, isToday, addMonths, subMonths
 } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
@@ -16,34 +17,47 @@ interface CalendarViewProps {
   onDateClick: (date: Date) => void;
   onAgendaClick: (agenda: Agenda) => void;
   onAgendaDrop: (agendaId: string, newDate: Date) => void;
+  /** Controlled — state dikelola dari parent (CalendarPage) */
+  currentMonth?: Date;
+  onMonthChange?: (month: Date) => void;
 }
 
 const weekDays = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 
-export const CalendarView = ({ agendas = [], onDateClick, onAgendaClick, onAgendaDrop }: CalendarViewProps) => {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+export const CalendarView = ({
+  agendas = [],
+  onDateClick,
+  onAgendaClick,
+  onAgendaDrop,
+  currentMonth: controlledMonth,
+  onMonthChange,
+}: CalendarViewProps) => {
+  // Fallback ke internal state jika tidak dikontrol dari luar
+  const [internalMonth, setInternalMonth] = useState(new Date());
+
+  const currentMonth = controlledMonth ?? internalMonth;
+
+  const setCurrentMonth = (next: Date) => {
+    if (onMonthChange) onMonthChange(next);
+    else setInternalMonth(next);
+  };
+
   const [draggedId, setDraggedId] = useState<string | null>(null);
 
-  // 1. Logic Memproses Status Otomatis secara Real-time
-  const processedAgendas = useMemo(() => {
-    return agendas.map(agenda => ({
-      ...agenda,
-      // Status dihitung otomatis berdasarkan waktu saat ini vs startTime/endTime
-      status: getAutomaticStatus(agenda)
-    }));
-  }, [agendas]);
+  const processedAgendas = useMemo(() =>
+    agendas.map(agenda => ({ ...agenda, status: getAutomaticStatus(agenda) })),
+  [agendas]);
 
-  // 2. Logic Generasi Hari dalam Kalender
   const days = useMemo(() => {
     const start = startOfWeek(startOfMonth(currentMonth));
-    const end = endOfWeek(endOfMonth(currentMonth));
+    const end   = endOfWeek(endOfMonth(currentMonth));
     return eachDayOfInterval({ start, end });
   }, [currentMonth]);
 
   return (
     <div className="bg-card rounded-2xl border border-border shadow-2xl flex flex-col overflow-hidden w-full">
-      
-      {/* --- HEADER NAVIGASI --- */}
+
+      {/* ── Header navigasi ─────────────────────────────────────────────────── */}
       <div className="p-6 flex items-center justify-between border-b bg-muted/30 flex-shrink-0">
         <div className="flex items-center gap-4">
           <div className="p-2 bg-primary/10 rounded-lg">
@@ -57,9 +71,9 @@ export const CalendarView = ({ agendas = [], onDateClick, onAgendaClick, onAgend
           <Button variant="ghost" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
             <ChevronLeft className="w-5 h-5" />
           </Button>
-          <Button 
-            variant="ghost" 
-            className="font-bold px-4 hover:bg-background transition-colors" 
+          <Button
+            variant="ghost"
+            className="font-bold px-4 hover:bg-background transition-colors"
             onClick={() => setCurrentMonth(new Date())}
           >
             Hari Ini
@@ -70,7 +84,7 @@ export const CalendarView = ({ agendas = [], onDateClick, onAgendaClick, onAgend
         </div>
       </div>
 
-      {/* --- NAMA HARI --- */}
+      {/* ── Nama hari ───────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-7 border-b bg-muted/10 flex-shrink-0">
         {weekDays.map(d => (
           <div key={d} className="py-4 text-center text-[11px] font-black uppercase text-muted-foreground tracking-[0.2em]">
@@ -79,18 +93,16 @@ export const CalendarView = ({ agendas = [], onDateClick, onAgendaClick, onAgend
         ))}
       </div>
 
-      {/* --- GRID KALENDER DINAMIS --- 
-          Gunakan minmax agar kotak yang kosong tidak menciut (tetap 160px)
-          dan kotak yang penuh tidak melar berlebihan (maks 260px sebelum scroll)
-      */}
-      <div 
+      {/* ── Grid kalender ───────────────────────────────────────────────────── */}
+      <div
         className="grid grid-cols-7 bg-border gap-[1px] overflow-hidden"
         style={{ gridAutoRows: 'minmax(160px, 260px)' }}
       >
         {days.map((day) => {
-          // Gunakan processedAgendas (yang statusnya sudah otomatis)
-          const dayAgendas = processedAgendas.filter(a => a.startTime && isSameDay(new Date(a.startTime), day));
-          
+          const dayAgendas = processedAgendas.filter(
+            a => a.startTime && isSameDay(new Date(a.startTime), day)
+          );
+
           return (
             <div
               key={day.toISOString()}
@@ -98,32 +110,30 @@ export const CalendarView = ({ agendas = [], onDateClick, onAgendaClick, onAgend
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => draggedId && onAgendaDrop(draggedId, day)}
               className={cn(
-                "bg-card p-3 group transition-all flex flex-col min-h-0 relative overflow-hidden hover:bg-muted/5",
-                !isSameMonth(day, currentMonth) && "opacity-20 bg-muted/20 grayscale pointer-events-none"
+                'bg-card p-3 group transition-all flex flex-col min-h-0 relative overflow-hidden hover:bg-muted/5',
+                !isSameMonth(day, currentMonth) && 'opacity-20 bg-muted/20 grayscale pointer-events-none'
               )}
             >
-              {/* Angka Tanggal */}
+              {/* Tanggal */}
               <div className="flex justify-between items-center mb-3 flex-shrink-0">
                 <span className={cn(
-                  "w-9 h-9 flex items-center justify-center text-lg font-bold rounded-xl transition-all duration-300",
-                  isToday(day) 
-                    ? "bg-primary text-primary-foreground shadow-lg shadow-primary/40 scale-110" 
-                    : "text-foreground/70 group-hover:text-primary group-hover:bg-primary/5"
+                  'w-9 h-9 flex items-center justify-center text-lg font-bold rounded-xl transition-all duration-300',
+                  isToday(day)
+                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/40 scale-110'
+                    : 'text-foreground/70 group-hover:text-primary group-hover:bg-primary/5'
                 )}>
                   {format(day, 'd')}
                 </span>
-
-                {/* Indikator Jumlah Agenda jika lebih dari 3 */}
                 {dayAgendas.length > 3 && (
-                   <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-full animate-in fade-in zoom-in">
-                     +{dayAgendas.length - 3}
-                   </span>
+                  <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-full animate-in fade-in zoom-in">
+                    +{dayAgendas.length - 3}
+                  </span>
                 )}
               </div>
-              
-              {/* Area Agenda dengan Scrollbar Custom */}
+
+              {/* Agenda items */}
               <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar min-h-0 pb-1">
-                <AnimatePresence mode='popLayout' initial={false}>
+                <AnimatePresence mode="popLayout" initial={false}>
                   {dayAgendas.map(agenda => (
                     <CalendarAgendaItem
                       key={agenda.id}

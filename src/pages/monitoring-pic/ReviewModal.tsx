@@ -3,7 +3,7 @@ import {
   X, FileCheck, DollarSign, CheckCircle2, XCircle,
   Paperclip, Loader2, AlertTriangle, Upload
 } from 'lucide-react';
-import { ReviewAction, ReviewState, SuratItem } from './Types';
+import { ReviewAction, ReviewState, SuratItem } from './types';
 
 interface ReviewModalProps {
   state: ReviewState;

@@ -12,6 +12,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
+import { useNotifSound } from '@/hooks/useNotifSound';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,8 @@ interface SuratItem {
   form_dept_name: string;
   unread_count?: number;
   finance_review_id?: string | null;
+  // ✅ FIX 1: tambah payment_file_path
+  payment_file_path?: string | null;
 }
 
 interface Department {
@@ -46,27 +49,29 @@ type FinalAction = 'SEND_SPK' | 'TO_FINANCE' | 'REJECT' | 'FINANCE_DONE' | 'FINA
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-const getFileUrl = (path: string | null): string | null => {
+const getFileUrl = (path: string | null | undefined): string | null => {
   if (!path) return null;
   if (path.startsWith('http')) return path;
   const bucket =
-    path.startsWith('spk_files/') ? 'spk_files' :
+    path.startsWith('spk_files/')        ? 'spk_files' :
     path.startsWith('chat_attachments/') ? 'chat_attachments' :
-    path.startsWith('payment_files/') || path.startsWith('payment-') ? 'payment_files' :
-    path.startsWith('lampiran_') ? 'lampiran_surat' :
+    // ✅ payment_files bisa pakai prefix payment- atau payment_files/
+    path.startsWith('payment_files/')    ? 'payment_files' :
+    path.startsWith('payment-')          ? 'payment_files' :
+    path.startsWith('lampiran_')         ? 'lampiran_surat' :
     'dokumen_surat';
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
 };
 
 const getStatusBadge = (surat: SuratItem) => {
   const r = surat.pic_review_status;
-  if (r === 'SPK')           return { label: 'SPK Diterbitkan',     color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
-  if (r === 'KEUANGAN')      return { label: 'Dialihkan Keuangan',  color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
-  if (r === 'KEUANGAN_DONE')     return { label: 'Keuangan Selesai',    color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+  if (r === 'SPK')               return { label: 'SPK Diterbitkan',    color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+  if (r === 'KEUANGAN')          return { label: 'Dialihkan Keuangan', color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
+  if (r === 'KEUANGAN_DONE')     return { label: 'Keuangan Selesai',   color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
   if (r === 'KEUANGAN_REJECTED') return { label: 'Ditolak Keuangan',   color: 'text-red-400 bg-red-500/10 border-red-500/20' };
-  if (r === 'REJECTED')          return { label: 'Ditolak',             color: 'text-red-400 bg-red-500/10 border-red-500/20' };
-  if (r === 'PENDING')       return { label: 'Menunggu Review',     color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
-  return { label: 'Baru Masuk', color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
+  if (r === 'REJECTED')          return { label: 'Ditolak',            color: 'text-red-400 bg-red-500/10 border-red-500/20' };
+  if (r === 'PENDING')           return { label: 'Menunggu Review',    color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+  return { label: 'Baru Masuk',                                        color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
 };
 
 // ── Action Modal ──────────────────────────────────────────────────────────
@@ -80,12 +85,15 @@ interface ActionModalProps {
   isLoading: boolean;
 }
 
-const ACTION_META: Record<FinalAction, { title: string; desc: string; needsFile: boolean; needsNote: boolean; btnClass: string; uploadLabel?: string }> = {
-  SEND_SPK:      { title: 'Kirim SPK',              desc: 'Upload file SPK lalu kirim ke pemohon. Proses PIC selesai.',           needsFile: true,  needsNote: false, btnClass: 'bg-emerald-600 hover:bg-emerald-700', uploadLabel: 'Klik untuk upload file SPK' },
-  TO_FINANCE:    { title: 'Alihkan ke Keuangan',    desc: 'Teruskan ke Tim Keuangan untuk diproses. Proses PIC selesai.',         needsFile: false, needsNote: false, btnClass: 'bg-blue-600 hover:bg-blue-700' },
-  REJECT:        { title: 'Tolak Pengajuan',        desc: 'Tolak dokumen ini. Pembuat akan diberi tahu. Proses selesai.',         needsFile: false, needsNote: true,  btnClass: 'bg-red-600 hover:bg-red-700' },
-  FINANCE_DONE:  { title: 'Kirim Bukti Transaksi',  desc: 'Upload bukti pembayaran/transaksi. Proses Keuangan selesai.',          needsFile: true,  needsNote: false, btnClass: 'bg-emerald-600 hover:bg-emerald-700', uploadLabel: 'Klik untuk upload bukti transaksi' },
-  FINANCE_REJECT:{ title: 'Tolak (Keuangan)',       desc: 'Tolak pengajuan dari sisi Keuangan. Wajib isi alasan.',               needsFile: false, needsNote: true,  btnClass: 'bg-red-600 hover:bg-red-700' },
+const ACTION_META: Record<FinalAction, {
+  title: string; desc: string; needsFile: boolean;
+  needsNote: boolean; btnClass: string; uploadLabel?: string;
+}> = {
+  SEND_SPK:       { title: 'Kirim SPK',             desc: 'Upload file SPK lalu kirim ke pemohon.',          needsFile: true,  needsNote: false, btnClass: 'bg-emerald-600 hover:bg-emerald-700', uploadLabel: 'Klik untuk upload file SPK' },
+  TO_FINANCE:     { title: 'Alihkan ke Keuangan',   desc: 'Teruskan ke Tim Keuangan untuk diproses.',        needsFile: false, needsNote: false, btnClass: 'bg-blue-600 hover:bg-blue-700' },
+  REJECT:         { title: 'Tolak Pengajuan',       desc: 'Tolak dokumen ini. Pembuat akan diberi tahu.',    needsFile: false, needsNote: true,  btnClass: 'bg-red-600 hover:bg-red-700' },
+  FINANCE_DONE:   { title: 'Kirim Bukti Transaksi', desc: 'Upload bukti pembayaran. Proses Keuangan selesai.',needsFile: true,  needsNote: false, btnClass: 'bg-emerald-600 hover:bg-emerald-700', uploadLabel: 'Klik untuk upload bukti transaksi' },
+  FINANCE_REJECT: { title: 'Tolak (Keuangan)',      desc: 'Tolak dari sisi Keuangan. Wajib isi alasan.',     needsFile: false, needsNote: true,  btnClass: 'bg-red-600 hover:bg-red-700' },
 };
 
 const ActionModal: React.FC<ActionModalProps> = ({ action, hasSPK, onConfirm, onCancel, isLoading }) => {
@@ -113,11 +121,10 @@ const ActionModal: React.FC<ActionModalProps> = ({ action, hasSPK, onConfirm, on
                 onChange={e => setFile(e.target.files?.[0] ?? null)} />
               <button onClick={() => fileRef.current?.click()}
                 className="w-full border-2 border-dashed border-white/10 rounded-xl p-4 flex flex-col items-center gap-2 hover:border-primary/40 transition-all">
-                {file ? (
-                  <><Paperclip size={18} className="text-primary" /><p className="text-[11px] font-bold text-primary">{file.name}</p></>
-                ) : (
-                  <><Upload size={18} className="text-white/30" /><p className="text-[11px] text-white/40">{meta.uploadLabel ?? 'Klik untuk upload file'}</p></>
-                )}
+                {file
+                  ? <><Paperclip size={18} className="text-primary" /><p className="text-[11px] font-bold text-primary">{file.name}</p></>
+                  : <><Upload size={18} className="text-white/30" /><p className="text-[11px] text-white/40">{meta.uploadLabel ?? 'Klik untuk upload file'}</p></>
+                }
               </button>
               {action === 'SEND_SPK' && hasSPK && !file && (
                 <p className="text-[10px] text-emerald-400 text-center">✓ SPK sebelumnya akan digunakan jika tidak upload baru</p>
@@ -148,7 +155,7 @@ const ActionModal: React.FC<ActionModalProps> = ({ action, hasSPK, onConfirm, on
   );
 };
 
-// ── Chat Panel (kanan) ────────────────────────────────────────────────────
+// ── Chat Panel ────────────────────────────────────────────────────────────
 
 interface ChatPanelProps {
   surat: SuratItem;
@@ -159,6 +166,10 @@ interface ChatPanelProps {
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser, isFinanceUser, onActionComplete }) => {
   const queryClient = useQueryClient();
+  const playNotif = useNotifSound();
+  // Ref agar playNotif bisa dipanggil dari dalam useEffect tanpa stale closure
+  const playNotifRef = useRef(playNotif);
+  useEffect(() => { playNotifRef.current = playNotif; }, [playNotif]);
   const [suratData, setSuratData] = useState(initialSurat);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -172,41 +183,34 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isChatOpen = suratData.chat_status === 'OPEN';
-  // SPK, KEUANGAN, REJECTED = semua final di sisi PIC
   const isFinalised = ['SPK', 'KEUANGAN_DONE', 'KEUANGAN_REJECTED', 'REJECTED'].includes(suratData.pic_review_status ?? '');
-  // PIC Keuangan melihat panel aksi jika surat berstatus KEUANGAN (belum diproses keuangan)
   const isKeuanganPending = suratData.pic_review_status === 'KEUANGAN';
   const showPICActions = !isFinalised && !isKeuanganPending;
+  // ✅ FIX 2: Finance user bisa aksi jika KEUANGAN (pending) saja — KEUANGAN_DONE sudah final
   const showFinanceActions = isFinanceUser && isKeuanganPending;
   const canSend = isChatOpen && !isSending;
 
-  // Sync saat prop berubah
   useEffect(() => { setSuratData(initialSurat); }, [initialSurat]);
 
-  // Load chat & mark read
   useEffect(() => {
     if (!suratData?.id) return;
     picService.getChatHistory(suratData.id).then(setMessages);
-    // Mark read di DB — sidebar akan sync via realtime UPDATE subscription sendiri
     supabase.from('surat_chats').update({ is_read: true })
-      .eq('surat_id', suratData.id).eq('sender_role', 'creator').eq('is_read', false)
-      .then();
+      .eq('surat_id', suratData.id).eq('sender_role', 'creator').eq('is_read', false).then();
   }, [suratData.id]);
 
-  // Realtime chat
   useEffect(() => {
     if (!suratData?.id) return;
     const ch = picService.subscribeChat(suratData.id, (msg) => {
       setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
       if (msg.sender_role === 'creator' && !msg.is_system) {
-        // Mark read di DB — sidebar sync via realtime sendiri
+        playNotifRef.current();
         supabase.from('surat_chats').update({ is_read: true }).eq('id', msg.id).then();
       }
     });
     return () => { supabase.removeChannel(ch); };
   }, [suratData.id]);
 
-  // Realtime status surat
   useEffect(() => {
     if (!suratData?.id) return;
     const ch = picService.subscribeSuratStatus(suratData.id, (updated) => {
@@ -216,12 +220,10 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
     return () => { supabase.removeChannel(ch); };
   }, [suratData.id, queryClient]);
 
-  // Auto scroll
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  // Toggle chat
   const handleToggleChat = async () => {
     setIsTogglingChat(true);
     try {
@@ -241,7 +243,6 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
     }
   };
 
-  // Upload SPK
   const handleSPKUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -263,7 +264,6 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
     }
   };
 
-  // Kirim pesan
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() && !attachment) return;
@@ -277,10 +277,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
         fileUrl = supabase.storage.from('chat_attachments').getPublicUrl(path).data.publicUrl;
       }
       await picService.sendMessage(suratData.id, newMessage, fileUrl, 'pic');
-
       setNewMessage('');
       setAttachment(null);
-    } catch (err: any) {
+    } catch {
       toast.error('Gagal mengirim pesan');
     } finally {
       setIsSending(false);
@@ -306,11 +305,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
           return;
         }
         await picService.takeAction(suratData.id, 'SEND_SPK', note);
-        toast.success('✅ SPK berhasil dikirim — proses selesai');
+        toast.success('✅ SPK berhasil dikirim');
 
       } else if (activeAction === 'TO_FINANCE') {
         await picService.takeAction(suratData.id, 'TO_FINANCE', note);
-        toast.success('💰 Dialihkan ke Keuangan — proses PIC selesai');
+        toast.success('💰 Dialihkan ke Keuangan');
 
       } else if (activeAction === 'REJECT') {
         await picService.takeAction(suratData.id, 'REJECT', note);
@@ -333,7 +332,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
           p_file_path: filePath,
         });
         if (error) throw error;
-        toast.success('✅ Bukti transaksi dikirim — proses Keuangan selesai');
+        // ✅ Update local state agar bukti bayar langsung tampil tanpa refresh
+        if (filePath) setSuratData(prev => ({ ...prev, payment_file_path: filePath }));
+        toast.success('✅ Bukti transaksi dikirim');
 
       } else if (activeAction === 'FINANCE_REJECT') {
         const reviewId = suratData.finance_review_id;
@@ -347,7 +348,6 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
         toast.success('❌ Pengajuan ditolak oleh Keuangan');
       }
 
-      setActiveAction(null);
       const newStatus =
         activeAction === 'SEND_SPK'       ? 'SPK' :
         activeAction === 'TO_FINANCE'     ? 'KEUANGAN' :
@@ -360,6 +360,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
         pic_review_status: newStatus ?? prev.pic_review_status,
         chat_status: 'CLOSED',
       }));
+      setActiveAction(null);
       queryClient.invalidateQueries({ queryKey: ['pic-chat-list'] });
       onActionComplete();
     } catch (err: any) {
@@ -369,10 +370,12 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
     }
   };
 
+  // ✅ FIX 3: Apakah ada bukti bayar (dari state lokal atau prop awal)
+  const paymentFileUrl = getFileUrl(suratData.payment_file_path ?? null);
+
   return (
     <div className="flex flex-col h-full bg-[#080a0f] relative">
 
-      {/* Modal Aksi */}
       {activeAction && (
         <ActionModal
           action={activeAction}
@@ -398,16 +401,19 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
               {suratData.judul_surat}
             </h2>
           </div>
-
-          {/* Indikator status */}
           <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[9px] font-black uppercase shrink-0 ${
-            isChatOpen ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-white/5 text-white/30 border-white/10'
+            isChatOpen
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : 'bg-white/5 text-white/30 border-white/10'
           }`}>
-            {isChatOpen ? <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live</> : <><Lock size={10} /> Tertutup</>}
+            {isChatOpen
+              ? <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live</>
+              : <><Lock size={10} /> Tertutup</>
+            }
           </div>
         </div>
 
-        {/* Tombol file */}
+        {/* ✅ FIX 4: Tombol file — termasuk SPK dan Bukti Bayar selalu tampil jika ada */}
         <div className="flex flex-wrap gap-1.5 mb-3">
           {suratData.file_path && (
             <a href={suratData.file_path} target="_blank" rel="noreferrer"
@@ -421,18 +427,25 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
               <Paperclip size={10} /> Lampiran
             </a>
           )}
+          {/* SPK — tampil di semua status jika ada */}
           {suratData.pic_attachment && (
             <a href={getFileUrl(suratData.pic_attachment) ?? '#'} target="_blank" rel="noreferrer"
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border bg-emerald-500/5 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10 transition-all">
               <FileCheck size={10} /> SPK
             </a>
           )}
+          {/* ✅ FIX 5: Bukti Bayar — tampil di semua status termasuk KEUANGAN_DONE */}
+          {paymentFileUrl && (
+            <a href={paymentFileUrl} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border bg-blue-500/5 text-blue-400 border-blue-500/20 hover:bg-blue-500/10 transition-all">
+              <Download size={10} /> Bukti Bayar
+            </a>
+          )}
         </div>
 
-        {/* ── PANEL AKSI PIC Pengadaan (jika belum diproses & bukan antrian keuangan) ── */}
+        {/* Panel Aksi PIC */}
         {showPICActions && (
           <div className="space-y-2">
-            {/* Upload SPK */}
             <div className="flex items-center justify-between p-2.5 bg-white/5 rounded-xl border border-white/10">
               <div className="flex items-center gap-2">
                 {suratData.pic_attachment
@@ -441,16 +454,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
                 }
               </div>
               <label className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all border ${
-                uploadingSPK ? 'opacity-50 pointer-events-none bg-white/5 border-white/10 text-white/30'
-                : 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
+                uploadingSPK
+                  ? 'opacity-50 pointer-events-none bg-white/5 border-white/10 text-white/30'
+                  : 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
               }`}>
                 {uploadingSPK ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
                 {suratData.pic_attachment ? 'Ganti' : 'Upload SPK'}
                 <input type="file" className="hidden" onChange={handleSPKUpload} disabled={uploadingSPK} />
               </label>
             </div>
-
-            {/* 3 tombol aksi */}
             <div className="grid grid-cols-3 gap-1.5">
               <button onClick={() => setActiveAction('SEND_SPK')}
                 className="flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all text-[9px] font-black uppercase">
@@ -465,21 +477,23 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
                 <XCircle size={14} /> Tolak
               </button>
             </div>
-
-            {/* Toggle chat */}
             <button onClick={handleToggleChat} disabled={isTogglingChat}
               className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all ${
                 isChatOpen
                   ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
                   : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
               }`}>
-              {isTogglingChat ? <Loader2 size={11} className="animate-spin" /> : isChatOpen
-                ? <><Lock size={11} /> Tutup Sesi Chat</> : <><LockOpen size={11} /> Buka Sesi Chat</>}
+              {isTogglingChat
+                ? <Loader2 size={11} className="animate-spin" />
+                : isChatOpen
+                  ? <><Lock size={11} /> Tutup Sesi Chat</>
+                  : <><LockOpen size={11} /> Buka Sesi Chat</>
+              }
             </button>
           </div>
         )}
 
-        {/* ── PANEL AKSI TIM KEUANGAN ── */}
+        {/* Panel Aksi Keuangan */}
         {showFinanceActions && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 rounded-xl border border-blue-500/20 text-[10px] font-black uppercase text-blue-400">
@@ -495,36 +509,58 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
                 <XCircle size={14} /> Tolak
               </button>
             </div>
-            {/* Toggle chat untuk PIC Keuangan */}
             <button onClick={handleToggleChat} disabled={isTogglingChat}
               className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all ${
                 isChatOpen
                   ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
                   : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
               }`}>
-              {isTogglingChat ? <Loader2 size={11} className="animate-spin" /> : isChatOpen
-                ? <><Lock size={11} /> Tutup Sesi Chat</> : <><LockOpen size={11} /> Buka Sesi Chat</>}
+              {isTogglingChat
+                ? <Loader2 size={11} className="animate-spin" />
+                : isChatOpen
+                  ? <><Lock size={11} /> Tutup Sesi Chat</>
+                  : <><LockOpen size={11} /> Buka Sesi Chat</>
+              }
             </button>
           </div>
         )}
 
-        {/* Surat sedang menunggu diproses keuangan (tampilkan ke PIC non-Keuangan) */}
+        {/* Menunggu Keuangan (non-finance user) */}
         {isKeuanganPending && !isFinanceUser && (
           <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 rounded-xl border border-blue-500/20 text-[10px] font-black uppercase text-blue-400">
             <Clock size={11} /> Menunggu diproses Tim Keuangan
           </div>
         )}
 
+        {/* ✅ FIX 6: Status final — tampilkan info selesai + tombol toggle chat */}
         {isFinalised && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-xl border border-white/10 text-[10px] font-black uppercase text-white/30">
-            <CheckCircle2 size={11} className="text-emerald-400" /> Dokumen sudah mendapat keputusan akhir
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-xl border border-white/10 text-[10px] font-black uppercase text-white/30">
+              <CheckCircle2 size={11} className="text-emerald-400" /> Dokumen sudah mendapat keputusan akhir
+            </div>
+            {/* Toggle chat tetap tersedia meski sudah final */}
+            <button onClick={handleToggleChat} disabled={isTogglingChat}
+              className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all ${
+                isChatOpen
+                  ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+              }`}>
+              {isTogglingChat
+                ? <Loader2 size={11} className="animate-spin" />
+                : isChatOpen
+                  ? <><Lock size={11} /> Tutup Sesi Chat</>
+                  : <><LockOpen size={11} /> Buka Sesi Chat</>
+              }
+            </button>
           </div>
         )}
       </div>
 
-      {/* Status bar chat */}
+      {/* Status bar */}
       <div className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 border-b shrink-0 ${
-        isChatOpen ? 'bg-emerald-500/5 text-emerald-400 border-emerald-500/10' : 'bg-white/2 text-white/20 border-white/5'
+        isChatOpen
+          ? 'bg-emerald-500/5 text-emerald-400 border-emerald-500/10'
+          : 'bg-white/2 text-white/20 border-white/5'
       }`}>
         {isChatOpen ? <><LockOpen size={10} /> Sesi diskusi aktif</> : <><Lock size={10} /> Chat tertutup</>}
       </div>
@@ -538,7 +574,6 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
           </div>
         )}
         {messages.map(msg => {
-          // Di MonitoringPICPage: isMe hanya jika kirim sebagai pic dari halaman ini
           const isMe = msg.sender_id === currentUser.id && msg.sender_role === 'pic';
           if (msg.is_system) {
             return (
@@ -595,7 +630,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ surat: initialSurat, currentUser,
         )}
         <form onSubmit={handleSend} className="flex gap-2">
           <label className={`p-2.5 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
-            !canSend ? 'bg-white/5 border-white/5 opacity-30 cursor-not-allowed' : 'bg-white/5 border-white/10 hover:bg-white/10 cursor-pointer'
+            !canSend
+              ? 'bg-white/5 border-white/5 opacity-30 cursor-not-allowed'
+              : 'bg-white/5 border-white/10 hover:bg-white/10 cursor-pointer'
           }`}>
             <Paperclip size={16} className="text-white/40" />
             <input type="file" className="hidden" disabled={!canSend} onChange={e => setAttachment(e.target.files?.[0] || null)} />
@@ -631,25 +668,19 @@ const MonitoringPICPage: React.FC = () => {
   const [activeDeptId, setActiveDeptId] = useState<string | null>(null);
   const [selectedSurat, setSelectedSurat] = useState<SuratItem | null>(null);
   const [search, setSearch] = useState('');
-
-  // unreadMap terpisah agar bisa diupdate realtime tanpa refetch seluruh list
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
 
-  // Auth — sekaligus fetch dept dalam satu useEffect agar tidak ada race condition
   useEffect(() => {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const [profileRes, deptRes] = await Promise.all([
         supabase.from('profiles').select('id, full_name').eq('id', user.id).single(),
         supabase.from('master_dept_pics')
           .select('dept_id, master_departments(id, name, code)')
           .eq('user_id', user.id),
       ]);
-
       if (profileRes.data) setCurrentUser(profileRes.data);
-
       if (deptRes.data) {
         const depts = deptRes.data.map((d: any) => d.master_departments).filter(Boolean) as Department[];
         setMyDepts(depts);
@@ -659,7 +690,6 @@ const MonitoringPICPage: React.FC = () => {
     init();
   }, []);
 
-  // Fetch surat — enabled setelah myDepts terisi (bukan hanya currentUser)
   const { data: suratList = [], isLoading, refetch } = useQuery<SuratItem[]>({
     queryKey: ['pic-chat-list', currentUser?.id, myDepts.map(d => d.id).join(',')],
     enabled: !!currentUser && myDepts.length > 0,
@@ -689,7 +719,8 @@ const MonitoringPICPage: React.FC = () => {
             master_forms(department_id, nama_form,
               master_departments(id, name, code)
             )
-          )
+          ),
+          finance_reviews(id, payment_file_path, status)
         `)
         .eq('status', 'DONE')
         .in('penggunaan_id', penggunaanIds)
@@ -697,13 +728,12 @@ const MonitoringPICPage: React.FC = () => {
 
       if (error) throw error;
 
-      // Hitung unread awal
+      // Unread count
       const suratIds = (data ?? []).map((s: any) => s.id);
       const newUnreadMap: Record<string, number> = {};
       if (suratIds.length > 0) {
         const { data: unreadData } = await supabase
-          .from('surat_chats')
-          .select('surat_id')
+          .from('surat_chats').select('surat_id')
           .in('surat_id', suratIds)
           .eq('sender_role', 'creator')
           .eq('is_read', false)
@@ -712,20 +742,20 @@ const MonitoringPICPage: React.FC = () => {
           newUnreadMap[r.surat_id] = (newUnreadMap[r.surat_id] || 0) + 1;
         });
       }
-      // Simpan ke state terpisah agar bisa diupdate realtime
       setUnreadMap(newUnreadMap);
 
-      // Fetch finance_review_id untuk surat yang sudah di-forward ke Keuangan
-      const keuanganSuratIds = (data ?? []).filter((s: any) => s.pic_review_status === 'KEUANGAN').map((s: any) => s.id);
+      // finance_review_id untuk surat KEUANGAN (pending)
       const financeReviewMap: Record<string, string> = {};
-      if (keuanganSuratIds.length > 0) {
-        const { data: finReviews } = await supabase
-          .from('finance_reviews')
-          .select('id, surat_id')
-          .in('surat_id', keuanganSuratIds)
-          .eq('status', 'PENDING');
-        (finReviews ?? []).forEach((fr: any) => { financeReviewMap[fr.surat_id] = fr.id; });
-      }
+      // ✅ FIX 7: payment_file_path map untuk semua surat yang punya finance_review
+      const paymentFileMap: Record<string, string | null> = {};
+
+      (data ?? []).forEach((s: any) => {
+        const fr = s.finance_reviews?.[0];
+        if (fr) {
+          if (fr.status === 'PENDING') financeReviewMap[s.id] = fr.id;
+          if (fr.payment_file_path) paymentFileMap[s.id] = fr.payment_file_path;
+        }
+      });
 
       return (data ?? []).map((s: any) => {
         const formDept = s.penggunaan?.master_forms?.master_departments;
@@ -735,15 +765,14 @@ const MonitoringPICPage: React.FC = () => {
           form_dept_id: formDept?.id ?? '',
           form_dept_name: formDept?.name ?? '',
           finance_review_id: financeReviewMap[s.id] ?? null,
+          // ✅ payment_file_path sekarang tersedia di setiap surat
+          payment_file_path: paymentFileMap[s.id] ?? null,
         };
       });
     },
     refetchInterval: 30_000,
   });
 
-  // Realtime surat_chats — satu-satunya yang mengatur unreadMap
-  // INSERT creator → naikkan badge (kecuali surat sedang dibuka → langsung mark read di DB)
-  // UPDATE is_read=true → turunkan badge (dipicu oleh mark read saat buka chat)
   const selectedSuratRef = useRef<SuratItem | null>(null);
   useEffect(() => { selectedSuratRef.current = selectedSurat; }, [selectedSurat]);
 
@@ -753,39 +782,21 @@ const MonitoringPICPage: React.FC = () => {
 
     const ch = supabase
       .channel('pic-unread-realtime')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'surat_chats',
-      }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surat_chats' }, (payload) => {
         const msg = payload.new as any;
         if (!suratIds.includes(msg.surat_id)) return;
         if (msg.sender_role !== 'creator' || msg.is_system) return;
-
         if (selectedSuratRef.current?.id === msg.surat_id) {
-          // Surat sedang terbuka → langsung mark read di DB, badge sudah 0
-          supabase.from('surat_chats')
-            .update({ is_read: true })
-            .eq('id', msg.id)
-            .then();
+          supabase.from('surat_chats').update({ is_read: true }).eq('id', msg.id).then();
         } else {
-          // Surat tidak terbuka → naikkan badge
           setUnreadMap(prev => ({ ...prev, [msg.surat_id]: (prev[msg.surat_id] || 0) + 1 }));
         }
       })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'surat_chats',
-      }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_chats' }, (payload) => {
         const msg = payload.new as any;
         const old = payload.old as any;
-        // Hanya proses jika is_read berubah dari false → true
         if (!old.is_read && msg.is_read && msg.sender_role === 'creator') {
-          setUnreadMap(prev => {
-            const cur = prev[msg.surat_id] ?? 0;
-            return { ...prev, [msg.surat_id]: Math.max(0, cur - 1) };
-          });
+          setUnreadMap(prev => ({ ...prev, [msg.surat_id]: Math.max(0, (prev[msg.surat_id] ?? 0) - 1) }));
         }
       })
       .subscribe();
@@ -793,31 +804,23 @@ const MonitoringPICPage: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [currentUser, suratList]);
 
-  // Saat surat dipilih → clear badge langsung + mark read di DB
   const handleSelectSurat = useCallback(async (surat: SuratItem) => {
     setSelectedSurat(surat);
-    // Langsung clear badge di state — jangan tunggu realtime
     setUnreadMap(prev => ({ ...prev, [surat.id]: 0 }));
-    // Mark read di DB (fire and forget)
-    supabase
-      .from('surat_chats')
-      .update({ is_read: true })
-      .eq('surat_id', surat.id)
-      .eq('sender_role', 'creator')
-      .eq('is_read', false)
-      .eq('is_system', false)
-      .then();
+    supabase.from('surat_chats').update({ is_read: true })
+      .eq('surat_id', surat.id).eq('sender_role', 'creator')
+      .eq('is_read', false).eq('is_system', false).then();
   }, []);
 
-  // Dept Keuangan dari myDepts (code = 'KEU')
   const keuanganDept = myDepts.find(d => d.code === 'KEU');
 
-  // Surat masuk ke tab dept jika:
-  // 1. form_dept_id cocok (jalur normal), ATAU
-  // 2. dept ini adalah Keuangan DAN surat sudah di-forward (pic_review_status = 'KEUANGAN')
+  // ✅ FIX 8: surat masuk tab Keuangan juga jika KEUANGAN_DONE / KEUANGAN_REJECTED
   const suratBelongsToDept = (s: SuratItem, deptId: string) => {
     if (s.form_dept_id === deptId) return true;
-    if (keuanganDept && deptId === keuanganDept.id && s.pic_review_status === 'KEUANGAN') return true;
+    if (keuanganDept && deptId === keuanganDept.id &&
+      ['KEUANGAN', 'KEUANGAN_DONE', 'KEUANGAN_REJECTED'].includes(s.pic_review_status ?? '')) {
+      return true;
+    }
     return false;
   };
 
@@ -827,7 +830,6 @@ const MonitoringPICPage: React.FC = () => {
     s.no_surat?.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Unread count per dept untuk badge tab
   const unreadPerDept = (deptId: string) =>
     suratList.filter(s => suratBelongsToDept(s, deptId) && (unreadMap[s.id] ?? 0) > 0).length;
 
@@ -849,7 +851,6 @@ const MonitoringPICPage: React.FC = () => {
       {/* ── SIDEBAR KIRI ── */}
       <div className="w-[300px] shrink-0 flex flex-col border-r border-white/5 bg-[#0a0c12]">
 
-        {/* Header */}
         <div className="px-5 pt-5 pb-4 border-b border-white/5">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
@@ -870,7 +871,8 @@ const MonitoringPICPage: React.FC = () => {
               const unread = unreadPerDept(dept.id);
               const isActive = activeDeptId === dept.id;
               return (
-                <button key={dept.id} onClick={() => { setActiveDeptId(dept.id); setSelectedSurat(null); }}
+                <button key={dept.id}
+                  onClick={() => { setActiveDeptId(dept.id); setSelectedSurat(null); }}
                   className={`flex-1 min-w-0 px-3 py-2.5 text-[9px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                     isActive ? 'border-primary text-primary' : 'border-transparent text-white/30 hover:text-white/60'
                   }`}>
@@ -886,7 +888,6 @@ const MonitoringPICPage: React.FC = () => {
           </div>
         )}
 
-        {/* Nama dept aktif (jika hanya 1 dept) */}
         {myDepts.length === 1 && (
           <div className="px-5 py-2 border-b border-white/5">
             <p className="text-[9px] font-black uppercase tracking-widest text-white/30">
@@ -895,7 +896,6 @@ const MonitoringPICPage: React.FC = () => {
           </div>
         )}
 
-        {/* Search */}
         <div className="px-4 py-3 border-b border-white/5">
           <div className="relative">
             <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" />
@@ -905,7 +905,6 @@ const MonitoringPICPage: React.FC = () => {
           </div>
         </div>
 
-        {/* List surat */}
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
@@ -927,19 +926,11 @@ const MonitoringPICPage: React.FC = () => {
                     className={`w-full text-left px-4 py-3.5 transition-all hover:bg-white/3 relative ${
                       isActive ? 'bg-primary/5 border-l-2 border-primary' : 'border-l-2 border-transparent'
                     }`}>
-
-                    {/* Dot chat open */}
-                    {surat.chat_status === 'OPEN' && (
-                      <span className="absolute top-3.5 right-3.5 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                    )}
-
-                    {/* Unread badge — pakai unreadMap dari state terpisah */}
                     {(unreadMap[surat.id] ?? 0) > 0 && (
                       <span className="absolute top-3 right-3 bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full">
                         {unreadMap[surat.id]}
                       </span>
                     )}
-
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <div className={`flex items-center gap-1 text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${badge.color}`}>
                         {badge.label}
@@ -948,7 +939,6 @@ const MonitoringPICPage: React.FC = () => {
                         {formatDistanceToNow(new Date(surat.updated_at), { addSuffix: true, locale: localeID })}
                       </span>
                     </div>
-
                     <p className={`text-[11px] font-bold truncate leading-tight mb-1 ${isActive ? 'text-primary' : 'text-white/80'}`}>
                       {surat.judul_surat}
                     </p>

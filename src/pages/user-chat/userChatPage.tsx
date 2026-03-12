@@ -4,13 +4,14 @@ import { supabase } from '@/lib/supabase';
 import { picService, ChatMessage } from '@/services/pic.service';
 import {
   Send, Paperclip, X, MessageSquare,
-  FileText, FileCheck, ExternalLink, Loader2, ChevronRight,
+  FileText, FileCheck, ExternalLink, Loader2,
   CheckCircle2, Clock, XCircle, Inbox, Search,
   AlertCircle, Download
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
+import { useNotifSound } from '@/hooks/useNotifSound';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ interface SuratItem {
   status: string;
   pic_review_status: string | null;
   pic_attachment: string | null;
-  pic_note: string | null;        // ← tambah
+  pic_note: string | null;
   chat_status: 'OPEN' | 'CLOSED';
   chat_opened_at: string | null;
   updated_at: string;
@@ -42,7 +43,7 @@ const getFileUrl = (path: string | null): string | null => {
   const bucket =
     path.startsWith('spk_files/') ? 'spk_files' :
     path.startsWith('payment_files/') ? 'payment_files' :
-    path.startsWith('payment-') ? 'payment_files' :       // path tanpa prefix folder
+    path.startsWith('payment-') ? 'payment_files' :
     path.startsWith('chat_attachments/') ? 'chat_attachments' :
     path.startsWith('lampiran_') ? 'lampiran_surat' :
     'dokumen_surat';
@@ -72,8 +73,6 @@ const StatusIcon = ({ surat }: { surat: SuratItem }) => {
   return <Clock size={13} className="text-slate-400" />;
 };
 
-// ── Bubble pic_note sintetis ───────────────────────────────────────────────
-// Dibuat sebagai ChatMessage palsu agar bisa dirender seragam di loop messages.
 const makePicNoteMsg = (surat: SuratItem): ChatMessage => ({
   id: `__pic_note__${surat.id}`,
   surat_id: surat.id,
@@ -91,6 +90,10 @@ const makePicNoteMsg = (surat: SuratItem): ChatMessage => ({
 
 const UserChatPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const playNotif = useNotifSound();
+  // Ref agar bisa dipanggil dari dalam useEffect tanpa stale closure / re-subscribe
+  const playNotifRef = useRef(playNotif);
+  useEffect(() => { playNotifRef.current = playNotif; }, [playNotif]);
   const [selected, setSelected] = useState<SuratItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatStatus, setChatStatus] = useState<'OPEN' | 'CLOSED'>('CLOSED');
@@ -102,7 +105,6 @@ const UserChatPage: React.FC = () => {
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const senderRoleRef = useRef<'creator' | 'pic'>('creator');
 
   const canSend = chatStatus === 'OPEN' && !isSending;
 
@@ -115,7 +117,7 @@ const UserChatPage: React.FC = () => {
     });
   }, []);
 
-  // ── Realtime: update list saat chat_status berubah di DB ───────────────
+  // ── Realtime: update list surat ───────────────────────────────────────
   useEffect(() => {
     if (!currentUser) return;
     const ch = supabase
@@ -185,10 +187,7 @@ const UserChatPage: React.FC = () => {
     setSelected(surat);
     setChatStatus(surat.chat_status ?? 'CLOSED');
     setMessages([]);
-
-    // Langsung clear badge surat ini
     setUnreadMap(prev => ({ ...prev, [surat.id]: 0 }));
-    // Mark read semua pesan dari PIC yang belum dibaca
     supabase.from('surat_chats')
       .update({ is_read: true })
       .eq('surat_id', surat.id)
@@ -198,84 +197,67 @@ const UserChatPage: React.FC = () => {
       .then();
 
     const history = await picService.getChatHistory(surat.id);
-
-    // Jika ada pic_note & belum masuk sebagai pesan di history → inject di depan
     if (surat.pic_note) {
       const alreadyInHistory = history.some(m => m.id === `__pic_note__${surat.id}`);
-      if (!alreadyInHistory) {
-        setMessages([makePicNoteMsg(surat), ...history]);
-      } else {
-        setMessages(history);
-      }
+      setMessages(alreadyInHistory ? history : [makePicNoteMsg(surat), ...history]);
     } else {
       setMessages(history);
     }
-
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  // ── Sync chatStatus dari selected ─────────────────────────────────────
   useEffect(() => {
     if (selected) setChatStatus(selected.chat_status ?? 'CLOSED');
   }, [selected?.chat_status]);
 
-  // ── Realtime: chat messages ────────────────────────────────────────────
-  useEffect(() => {
-    if (!selected) return;
-    const ch = picService.subscribeChat(selected.id, (msg) => {
-      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
-    });
-    return () => { supabase.removeChannel(ch); };
-  }, [selected?.id]);
-
-  // ── Fetch unread count awal + realtime surat_chats UPDATE ───────────────
+  // ── Realtime: chat messages — bunyikan notif saat pesan dari PIC masuk ─
   const selectedRef = useRef<SuratItem | null>(null);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   useEffect(() => {
+    if (!selected) return;
+    const ch = picService.subscribeChat(selected.id, (msg) => {
+      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
+      // Bunyikan notif hanya untuk pesan dari PIC (bukan pesan sendiri, bukan sistem)
+      if (msg.sender_role === 'pic' && !msg.is_system) {
+        playNotifRef.current();
+      }
+    });
+    return () => { supabase.removeChannel(ch); };
+  }, [selected?.id]); // playNotif via ref — tidak perlu di deps
+
+  // ── Unread badge dari PIC ─────────────────────────────────────────────
+  useEffect(() => {
     if (!currentUser || suratList.length === 0) return;
     const suratIds = suratList.map(s => s.id);
 
-    // Fetch unread per surat (pesan dari PIC yang belum dibaca)
     const fetchUnread = async () => {
       const { data } = await supabase
-        .from('surat_chats')
-        .select('surat_id')
+        .from('surat_chats').select('surat_id')
         .in('surat_id', suratIds)
         .eq('sender_role', 'pic')
         .eq('is_read', false)
         .eq('is_system', false);
-
       const map: Record<string, number> = {};
-      (data ?? []).forEach((r: any) => {
-        map[r.surat_id] = (map[r.surat_id] ?? 0) + 1;
-      });
+      (data ?? []).forEach((r: any) => { map[r.surat_id] = (map[r.surat_id] ?? 0) + 1; });
       setUnreadMap(map);
     };
-
     fetchUnread();
 
     const ch = supabase.channel(`user-chat-unread:${currentUser.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'surat_chats',
-      }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surat_chats' }, (payload) => {
         const msg = payload.new as any;
         if (!suratIds.includes(msg.surat_id)) return;
         if (msg.sender_role !== 'pic' || msg.is_system) return;
-        // Jika surat sedang terbuka → langsung mark read
         if (selectedRef.current?.id === msg.surat_id) {
           supabase.from('surat_chats').update({ is_read: true }).eq('id', msg.id).then();
         } else {
+          // Bunyikan notif untuk surat yang tidak sedang terbuka
+          playNotifRef.current();
           setUnreadMap(prev => ({ ...prev, [msg.surat_id]: (prev[msg.surat_id] ?? 0) + 1 }));
         }
       })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'surat_chats',
-      }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_chats' }, (payload) => {
         const msg = payload.new as any;
         const old = payload.old as any;
         if (!old.is_read && msg.is_read && msg.sender_role === 'pic') {
@@ -285,18 +267,15 @@ const UserChatPage: React.FC = () => {
       .subscribe();
 
     return () => { supabase.removeChannel(ch); };
-  }, [currentUser, suratList]);
+  }, [currentUser, suratList]); // playNotif via ref — tidak perlu di deps
 
-  // ── Sync pic_note ke messages jika selected berubah (realtime update) ──
+  // ── Sync pic_note ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!selected) return;
     setMessages(prev => {
       const noteId = `__pic_note__${selected.id}`;
       const withoutNote = prev.filter(m => m.id !== noteId);
-      if (selected.pic_note) {
-        return [makePicNoteMsg(selected), ...withoutNote];
-      }
-      return withoutNote;
+      return selected.pic_note ? [makePicNoteMsg(selected), ...withoutNote] : withoutNote;
     });
   }, [selected?.pic_note]);
 
@@ -308,13 +287,14 @@ const UserChatPage: React.FC = () => {
     const curr = selected.chat_status;
     if (prev !== null && prev !== curr) {
       if (curr === 'OPEN') {
+        playNotifRef.current();
         toast.success('PIC membuka sesi diskusi — Anda dapat mengirim pesan', { duration: 4000 });
       } else {
         toast('Sesi diskusi ditutup oleh PIC', { icon: '🔒', duration: 4000 });
       }
     }
     prevChatStatusRef.current = curr;
-  }, [selected?.chat_status]);
+  }, [selected?.chat_status]); // playNotif via ref — tidak perlu di deps
 
   // ── Auto scroll ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -326,7 +306,6 @@ const UserChatPage: React.FC = () => {
     e.preventDefault();
     if (!selected || (!newMessage.trim() && !attachment)) return;
     if (chatStatus !== 'OPEN') return toast.error('Chat masih tertutup, tunggu PIC membuka sesi');
-
     setIsSending(true);
     try {
       let fileUrl: string | null = null;
@@ -336,7 +315,6 @@ const UserChatPage: React.FC = () => {
         fileUrl = path;
       }
       await picService.sendMessage(selected.id, newMessage, fileUrl, 'creator');
-
       setNewMessage('');
       setAttachment(null);
     } catch (err: any) {
@@ -396,11 +374,6 @@ const UserChatPage: React.FC = () => {
                     isActive ? 'bg-primary/5 border-l-4 border-primary' : 'hover:bg-secondary/30 border-l-4 border-transparent'
                   }`}
                 >
-                  {/* Dot hijau sesi aktif */}
-                  {surat.chat_status === 'OPEN' && unread === 0 && (
-                    <span className="absolute top-4 right-4 w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                  )}
-                  {/* Badge angka unread dari PIC */}
                   {unread > 0 && (
                     <span className="absolute top-3 right-3 min-w-[18px] h-[18px] flex items-center justify-center bg-primary text-primary-foreground text-[9px] font-black rounded-full px-1 animate-bounce">
                       {unread > 9 ? '9+' : unread}
@@ -459,7 +432,6 @@ const UserChatPage: React.FC = () => {
                   Ditangani: <span className="text-foreground/70">{selected.pic_name ?? 'N/A'}</span>
                 </p>
               </div>
-
             </div>
 
             {/* Messages Area */}
@@ -471,7 +443,6 @@ const UserChatPage: React.FC = () => {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  // Di UserChatPage: isMe hanya jika kirim sebagai creator dari halaman ini
                   const isMe = msg.sender_id === currentUser?.id && msg.sender_role === 'creator' && !msg.id.startsWith('__pic_note__');
                   const isNote = msg.id.startsWith('__pic_note__');
 
@@ -492,7 +463,6 @@ const UserChatPage: React.FC = () => {
                           <span className={`text-[9px] font-black uppercase tracking-widest ${isMe ? 'text-primary' : 'text-muted-foreground'}`}>
                             {isMe ? 'Anda' : (msg.sender_name ?? 'PIC')}
                           </span>
-                          {/* Label "Catatan" khusus untuk pic_note */}
                           {isNote && (
                             <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 tracking-tight">
                               Catatan
@@ -530,7 +500,7 @@ const UserChatPage: React.FC = () => {
               )}
             </div>
 
-            {/* Sticky Banners */}
+            {/* Sticky Banners + File Buttons */}
             <div className="px-8 space-y-2 mb-4 shrink-0">
               <div className="flex flex-wrap gap-2">
                 {selected.file_path && (

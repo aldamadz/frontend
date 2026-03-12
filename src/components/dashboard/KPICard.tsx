@@ -1,4 +1,3 @@
-// frontend\src\components\dashboard\KPICard.tsx
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Minus, CheckCircle2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';

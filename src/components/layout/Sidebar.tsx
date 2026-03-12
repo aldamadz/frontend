@@ -58,17 +58,43 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
 
   // ── Badge states ──────────────────────────────────────────────────────────
   const [chatBadgeCount, setChatBadgeCount] = useState(0)
-  const [creatorChatBadge, setCreatorChatBadge] = useState(0) // pesan dari PIC belum dibaca (untuk pembuat)
-  const [monitoringBadge, setMonitoringBadge] = useState(0) // surat menunggu review PIC
+  const [creatorChatBadge, setCreatorChatBadge] = useState(0)
+  const [monitoringBadge, setMonitoringBadge] = useState(0)
   const [financeBadgeCount, setFinanceBadgeCount] = useState(0)
   const [picQueueCount, setPicQueueCount] = useState(0)
-  const prevChatCountRef = useRef(0)
+
+  const prevChatCountRef    = useRef(0)
+  const prevCreatorBadgeRef = useRef(-1) // -1 = belum init → jangan bunyi pertama kali
   const prevFinanceCountRef = useRef(0)
+  const prevPicQueueRef     = useRef(-1) // -1 = belum init → jangan bunyi pertama kali
+
+  // ── SATU fungsi notif untuk semua — pakai notif.WAV ──────────────────────
+  const playNotif = () => {
+    try {
+      const audio = new Audio('/sounds/notif.WAV')
+      audio.volume = 0.6
+      audio.play().catch(() => {
+        // Fallback Web Audio API jika autoplay diblokir browser
+        try {
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination)
+          osc.type = 'sine'
+          osc.frequency.setValueAtTime(1046, ctx.currentTime)
+          osc.frequency.setValueAtTime(1318, ctx.currentTime + 0.12)
+          osc.frequency.setValueAtTime(1567, ctx.currentTime + 0.24)
+          gain.gain.setValueAtTime(0.3, ctx.currentTime)
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+          osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.5)
+        } catch {}
+      })
+    } catch {}
+  }
 
   // ── Reset picQueueCount saat user membuka /pic/monitoring ─────────────────
   useEffect(() => {
     if (location.pathname.startsWith('/pic/monitoring') && user?.id && isUserPIC) {
-      // Re-fetch badge setelah sedikit delay (beri waktu halaman proses)
       const t = setTimeout(async () => {
         const { data: deptPics } = await supabase
           .from('master_dept_pics').select('dept_id').eq('user_id', user.id);
@@ -137,7 +163,6 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     if (!user?.id) return;
 
     const fetchInboxCount = async () => {
-      // Query surat_registrasi yang PROSES dulu, lalu cek signature user
       const { data: suratProses } = await supabase
         .from('surat_registrasi')
         .select('id, current_step')
@@ -184,26 +209,10 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
-  // ── Badge: pesan unread dari creator untuk PIC ────────────────────────────
+  // ── Badge: pesan unread dari creator untuk PIC + picQueueCount ──────────
   useEffect(() => {
     if (!user?.id || !isUserPIC) return;
 
-    const playChime = () => {
-      try {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.2);
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.4);
-      } catch {}
-    };
-
-    // Fetch count langsung dari DB — selalu akurat karena baca is_read terbaru
     const fetchChatBadge = async () => {
       const { data: deptPics } = await supabase
         .from('master_dept_pics').select('dept_id').eq('user_id', user.id);
@@ -237,68 +246,59 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         .eq('is_system', false);
 
       const n = count ?? 0;
-      // Chime hanya saat ada pesan BARU (naik), bukan saat read (turun)
-      if (n > prevChatCountRef.current && prevChatCountRef.current >= 0) playChime();
+      // ✅ Bunyi notif.WAV saat pesan creator baru masuk (count naik)
+      if (n > prevChatCountRef.current && prevChatCountRef.current >= 0) playNotif();
       prevChatCountRef.current = n;
       setChatBadgeCount(n);
 
-      // Hitung surat yang menunggu review PIC (pic_review_status = PENDING, status = DONE)
+      // ── Hitung picQueueCount ──────────────────────────────────────────────
       const { count: qCount } = await supabase
         .from('surat_registrasi')
         .select('id', { count: 'exact', head: true })
         .in('penggunaan_id', penggunaanIds)
         .eq('pic_review_status', 'PENDING')
         .eq('status', 'DONE');
-      setPicQueueCount(qCount ?? 0);
+
+      const newQ = qCount ?? 0;
+      if (prevPicQueueRef.current >= 0 && newQ > prevPicQueueRef.current) {
+        playNotif();
+        toast.info('📋 Pengajuan baru masuk ke antrian PIC!', {
+          duration: 5000,
+          description: `${newQ} pengajuan menunggu review`,
+        });
+      }
+      prevPicQueueRef.current = newQ;
+      setPicQueueCount(newQ);
     };
 
     fetchChatBadge();
 
-    // ── Realtime: dengarkan INSERT pesan baru DAN UPDATE is_read ─────────────
-    // Dengan listen ke UPDATE, saat PIC mark read di MonitoringPICPage,
-    // sidebar langsung sync tanpa perlu window.dispatchEvent
     const ch = supabase.channel('sidebar-chat-badge')
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'surat_registrasi',
-      }, fetchChatBadge)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'surat_chats',
-      }, fetchChatBadge)
-      .on('postgres_changes', {
-        // ← INI YANG FIX: saat is_read di-update jadi true, sidebar langsung re-fetch
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'surat_chats',
-      }, fetchChatBadge)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_registrasi' }, fetchChatBadge)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surat_chats' }, fetchChatBadge)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surat_chats' }, fetchChatBadge)
       .subscribe();
 
-    // HAPUS window.addEventListener('chat-read') — tidak diperlukan lagi
-    // Sidebar sekarang sinkron murni via Supabase realtime
-
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return () => { supabase.removeChannel(ch); };
   }, [user?.id, isUserPIC]);
 
-  // ── Badge: pesan dari PIC belum dibaca (untuk pembuat/creator) ──────────────
+  // ── Badge: pesan dari PIC belum dibaca (untuk pembuat/creator) ──────────
   useEffect(() => {
     if (!user?.id) return;
 
     const fetchCreatorBadge = async () => {
-      // Ambil surat yang dibuat oleh user ini
       const { data: surats } = await supabase
         .from('surat_registrasi')
         .select('id')
         .eq('created_by', user.id)
         .eq('status', 'DONE');
-      if (!surats?.length) { setCreatorChatBadge(0); return; }
+      if (!surats?.length) {
+        setCreatorChatBadge(0);
+        prevCreatorBadgeRef.current = 0;
+        return;
+      }
       const suratIds = surats.map((s: any) => s.id);
 
-      // Hitung pesan dari PIC yang belum dibaca
       const { count } = await supabase
         .from('surat_chats')
         .select('id', { count: 'exact', head: true })
@@ -307,12 +307,15 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         .eq('is_read', false)
         .eq('is_system', false);
 
-      setCreatorChatBadge(count ?? 0);
+      const n = count ?? 0;
+      // ✅ Bunyi notif.WAV saat ada pesan baru dari PIC — suara sama persis
+      if (prevCreatorBadgeRef.current >= 0 && n > prevCreatorBadgeRef.current) {
+        playNotif();
+      }
+      prevCreatorBadgeRef.current = n;
+      setCreatorChatBadge(n);
     };
 
-    fetchCreatorBadge();
-
-    // Hitung surat milik user yang menunggu review PIC (semua sign selesai, belum ada keputusan PIC)
     const fetchMonitoringBadge = async () => {
       const { data: surats } = await supabase
         .from('surat_registrasi')
@@ -322,7 +325,9 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         .is('pic_review_status', null);
       setMonitoringBadge(surats?.length ?? 0);
     };
+
     fetchMonitoringBadge();
+    fetchCreatorBadge();
 
     const ch = supabase.channel(`sidebar-creator-chat-badge:${user.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surat_chats' }, fetchCreatorBadge)
@@ -337,28 +342,14 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
   useEffect(() => {
     if (!user?.id || !isUserFinance) return;
 
-    const playFinanceChime = () => {
-      try {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(660, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
-        gain.gain.setValueAtTime(0.25, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.35);
-      } catch {}
-    };
-
     const fetchFinanceBadge = async () => {
       const { count } = await supabase
         .from('finance_reviews')
         .select('id', { count: 'exact', head: true })
         .in('status', ['PENDING', 'IN_REVIEW']);
       const n = count ?? 0;
-      if (n > prevFinanceCountRef.current && prevFinanceCountRef.current > 0) playFinanceChime();
+      // ✅ Bunyi notif.WAV yang sama saat antrean keuangan bertambah
+      if (n > prevFinanceCountRef.current && prevFinanceCountRef.current > 0) playNotif();
       prevFinanceCountRef.current = n;
       setFinanceBadgeCount(n);
     };
@@ -411,10 +402,25 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
         >
           <div className="relative shrink-0">
             <Icon className={cn(isSubItem ? "w-4 h-4" : "w-5 h-5", isActive ? "text-primary" : "text-muted-foreground")} />
+            {/* Badge collapsed: Persetujuan */}
             {collapsed && label === 'Persetujuan' && inboxCount > 0 && (
               <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 z-10">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-sidebar"></span>
+              </span>
+            )}
+            {/* Badge collapsed: Antrean Review PIC */}
+            {collapsed && label === 'Antrean Review PIC' && picQueueCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 z-10">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border-2 border-sidebar"></span>
+              </span>
+            )}
+            {/* Badge collapsed: Diskusi PIC (untuk pembuat) */}
+            {collapsed && label === 'Diskusi PIC' && creatorChatBadge > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 z-10">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/60 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-primary border-2 border-sidebar"></span>
               </span>
             )}
           </div>
@@ -503,7 +509,7 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <Mail className="w-5 h-5" />
-                  {collapsed && (inboxCount > 0 || chatBadgeCount > 0 || creatorChatBadge > 0) && (
+                  {collapsed && (inboxCount > 0 || chatBadgeCount > 0 || creatorChatBadge > 0 || picQueueCount > 0) && (
                     <span className="absolute -top-1 -right-1 flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
@@ -517,6 +523,11 @@ export const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
                   {creatorChatBadge > 0 && !isSuratOpen && (
                     <span className="bg-primary text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
                       {creatorChatBadge > 99 ? '99+' : creatorChatBadge}
+                    </span>
+                  )}
+                  {picQueueCount > 0 && !isSuratOpen && (
+                    <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
+                      {picQueueCount > 99 ? '99+' : picQueueCount}
                     </span>
                   )}
                   {inboxCount > 0 && !isSuratOpen && (

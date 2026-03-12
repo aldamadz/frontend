@@ -51,8 +51,8 @@ export default function WorkflowDetailManagementPage() {
 
       const { data: workflowData, error } = await supabase
         .from("master_penggunaan_detail")
-        .select(`*, master_forms!master_penggunaan_detail_form_id_fkey (nama_form)`)
-        .order("created_at", { ascending: false }); // Menggunakan created_at sebagai ganti level
+        .select(`*, master_forms!fk_master_forms (nama_form)`)
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
       setDetails(workflowData || []);

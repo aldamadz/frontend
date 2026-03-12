@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from "@/lib/supabase";
 import { 
@@ -22,9 +23,8 @@ import { PreviewModal } from "@/components/surat/PreviewModal";
 const getPaymentUrl = (path: string | null): string | null => {
   if (!path) return null;
   if (path.startsWith('http')) return path;
-  // path bisa: 'payment_files/xxx' atau 'payment-xxx'
   const key = path.startsWith('payment_files/') ? path.slice('payment_files/'.length) : path;
-  return `https://xuhyodtmgwteyslhrkfx.supabase.co/storage/v1/object/public/payment_files/${key}`;
+  return `https://xuhyodtmgwteyslhrkfx.supabase.co/storage/v1/object/public/spk_files/payment_files/${key}`;
 };
 
 type DocStatus = 'PROSES' | 'SELESAI' | 'DITOLAK' | 'MENUNGGU_PIC' | 'KEUANGAN';
@@ -126,7 +126,8 @@ const FILTER_OPTIONS: { value: string; label: string }[] = [
 
 const MonitoringPage = () => {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [searchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') ?? 'all');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [selectedSurat, setSelectedSurat] = useState<any>(null);
@@ -145,7 +146,7 @@ const MonitoringPage = () => {
             *,
             pic:profiles!surat_registrasi_pic_id_fkey ( full_name ),
             surat_signatures (
-              id, step_order, is_signed, status, role_name, signed_at,
+              id, step_order, is_signed, status, role_name, signed_at, catatan,
               profiles:user_id ( full_name )
             ),
             finance_reviews ( payment_file_path, status )
@@ -159,7 +160,6 @@ const MonitoringPage = () => {
 
       if (error) throw error;
 
-      // Buat map: user_id → array dept
       const picDeptMap: Record<string, any[]> = {};
       for (const row of picDeptData ?? []) {
         if (!picDeptMap[row.user_id]) picDeptMap[row.user_id] = [];
@@ -202,7 +202,6 @@ const MonitoringPage = () => {
     const sigs = [...(s.surat_signatures || [])].sort((a, b) => a.step_order - b.step_order);
     const picName = (s.pic as any)?.full_name ?? null;
 
-    // Resolve dept PIC yang relevan berdasarkan pic_review_status
     const picDepts: any[] = s._pic_dept_list ?? [];
     const isKeuanganStatus = ['KEUANGAN', 'KEUANGAN_DONE', 'KEUANGAN_REJECTED'].includes(s.pic_review_status);
     const picDept = isKeuanganStatus
@@ -385,7 +384,6 @@ const MonitoringPage = () => {
                 </div>
 
                 <div className="mt-8 pt-4 border-t border-border/40 space-y-3">
-                  {/* Status detail */}
                   <div className="flex items-center gap-2 overflow-hidden flex-1">
                     <Info size={12} className="text-muted-foreground shrink-0" />
                     <span className="text-[9px] font-black uppercase text-foreground/70 tracking-tight truncate">
@@ -393,7 +391,6 @@ const MonitoringPage = () => {
                     </span>
                   </div>
 
-                  {/* Nama PIC jika ada */}
                   {picName && (
                     <div className="flex items-center gap-2 overflow-hidden">
                       <User size={12} className="text-muted-foreground shrink-0" />
@@ -430,7 +427,7 @@ const MonitoringPage = () => {
         </div>
       )}
 
-      {/* DETAIL & FEEDBACK MODAL — struktur asli */}
+      {/* DETAIL & FEEDBACK MODAL */}
       <Dialog open={isChatOpen} onOpenChange={setIsChatOpen}>
         <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-card border-border rounded-3xl shadow-2xl">
           <DialogHeader className="p-6 border-b border-border bg-muted/20">
@@ -497,25 +494,42 @@ const MonitoringPage = () => {
                 <div className="absolute left-[13px] top-2 bottom-2 w-0.5 bg-border" />
                 {[...(selectedSurat?._sigs || [])].map((sig: any) => (
                   <div key={sig.id} className="relative pl-9">
+                    {/* Icon bubble */}
                     <div className={cn(
                       "absolute left-0 w-7 h-7 rounded-full flex items-center justify-center z-10 border-4 border-background",
+                      sig.status === 'REJECTED' ? "bg-red-500 text-white" :
                       sig.is_signed ? "bg-emerald-500 text-white" :
-                      sig.status === 'REJECTED' ? "bg-red-500 text-white" : "bg-muted text-muted-foreground"
+                      "bg-muted text-muted-foreground"
                     )}>
-                      {sig.is_signed ? <CheckCircle2 size={12} /> :
-                       sig.status === 'REJECTED' ? <XCircle size={12} /> :
+                      {sig.status === 'REJECTED' ? <XCircle size={12} /> :
+                       sig.is_signed ? <CheckCircle2 size={12} /> :
                        <span className="text-[10px] font-bold">{sig.step_order}</span>}
                     </div>
-                    <div className="flex flex-col p-3 rounded-xl border border-border bg-muted/5">
-                      <span className="text-[10px] font-black uppercase text-foreground">{sig.role_name}</span>
-                      <div className="flex items-center gap-2 text-[9px] text-muted-foreground font-medium uppercase">
-                        <User size={10} /> {(sig.profiles as any)?.full_name || 'Menunggu Antrian...'}
+
+                    {/* Card */}
+                    <div className={cn(
+                      "flex flex-col p-3 rounded-xl border bg-muted/5",
+                      sig.status === 'REJECTED' ? "border-red-500/30 bg-red-500/5" : "border-border"
+                    )}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black uppercase text-foreground">{sig.role_name}</span>
                         {sig.signed_at && (
-                          <span className="ml-auto font-mono text-[8px] opacity-60">
+                          <span className="font-mono text-[8px] text-muted-foreground opacity-60 shrink-0">
                             {new Date(sig.signed_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
                       </div>
+                      <div className="flex items-center gap-2 text-[9px] text-muted-foreground font-medium uppercase mt-0.5">
+                        <User size={10} /> {(sig.profiles as any)?.full_name || 'Menunggu Antrian...'}
+                      </div>
+
+                      {/* ── Catatan penolakan ── */}
+                      {sig.status === 'REJECTED' && sig.catatan && (
+                        <div className="mt-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                          <p className="text-[9px] font-black uppercase text-red-400 mb-1 tracking-widest">Alasan Penolakan</p>
+                          <p className="text-[11px] text-red-300/90 font-medium leading-relaxed">{sig.catatan}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
