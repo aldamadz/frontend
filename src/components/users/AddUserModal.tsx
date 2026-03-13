@@ -19,9 +19,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { User, Role } from '@/types/agenda';
-import { getDepartments, Department } from '@/services/department.service';
-import { getOffices } from '@/services/office.service';
-import { Office } from '@/types/office';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import {
@@ -54,16 +51,20 @@ const EMPTY_FORM = {
 
 export const AddUserModal = ({ isOpen, onClose, onSuccess, allUsers }: AddUserModalProps) => {
   const [loading, setLoading]         = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [offices, setOffices]         = useState<Office[]>([]);
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [offices, setOffices]         = useState<{ id: number; name: string }[]>([]);
   const [formData, setFormData]       = useState(EMPTY_FORM);
 
   useEffect(() => {
     if (!isOpen) return;
     setFormData(EMPTY_FORM);
-    Promise.all([getDepartments(), getOffices()])
-      .then(([depts, offs]) => { setDepartments(depts); setOffices(offs); })
-      .catch(console.error);
+    Promise.all([
+      supabase.from('master_departments').select('id,name').order('name'),
+      supabase.from('offices').select('id,name').order('name'),
+    ]).then(([{ data: depts }, { data: offs }]) => {
+      setDepartments(depts || []);
+      setOffices(offs || []);
+    }).catch(console.error);
   }, [isOpen]);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -90,7 +91,7 @@ export const AddUserModal = ({ isOpen, onClose, onSuccess, allUsers }: AddUserMo
             role:        formData.role       || 'user',
             join_date:   formData.join_date  || null,
             resign_date: formData.resign_date || null,
-            department_id: formData.departmentId === 'none' ? null : Number(formData.departmentId),
+            department_id: formData.departmentId === 'none' ? null : formData.departmentId,
             office_id:     formData.officeId     === 'none' ? null : Number(formData.officeId),
           }),
         }

@@ -6,7 +6,7 @@ export interface ChildUser {
   nik: string;
   full_name: string;
   avatar_url: string | null;
-  department_id: number | null;
+  department_id: string | null;  // uuid — FK ke master_departments
   office_id: number | null;
   parent_id: string | null;
   displayName?: string; // Untuk label di dropdown
@@ -104,7 +104,6 @@ export async function getUserHierarchy(parentId: string): Promise<string[]> {
     children.forEach(child => {
       if (!allSubordinateIds.includes(child.id)) {
         allSubordinateIds.push(child.id);
-        // Terus telusuri sampai level terbawah
         findChildrenRecursive(child.id);
       }
     });

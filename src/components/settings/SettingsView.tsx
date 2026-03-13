@@ -1,15 +1,13 @@
 // SettingsView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { differenceInYears, differenceInMonths, differenceInDays, addYears, addMonths } from 'date-fns';
 import { 
-  Bell, Shield, User as UserIcon, 
+  Shield, User as UserIcon, 
   Key, Mail, Briefcase, Building, Fingerprint, Loader2, 
-  Camera
+  Camera, Phone, CalendarDays
 } from 'lucide-react';
 
-// UI Components
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
@@ -130,6 +128,27 @@ export const SettingsView = () => {
   const displayName = user?.full_name || user?.fullName || 'User';
   const avatarSrc = user?.avatar_url || user?.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`;
 
+  const tenureText = (() => {
+    if (!user?.join_date) return '-';
+    const start = new Date(user.join_date);
+    if (isNaN(start.getTime())) return '-';
+    const now = new Date();
+    if (now <= start) return 'Baru bergabung';
+
+    const years = differenceInYears(now, start);
+    const afterYears = addYears(start, years);
+    const months = differenceInMonths(now, afterYears);
+    const afterMonths = addMonths(afterYears, months);
+    const days = differenceInDays(now, afterMonths);
+
+    const parts: string[] = [];
+    if (years > 0) parts.push(`${years} tahun`);
+    if (months > 0) parts.push(`${months} bulan`);
+    if (days > 0) parts.push(`${days} hari`);
+
+    return parts.join(' ') || 'Baru bergabung';
+  })();
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
       <header>
@@ -178,57 +197,50 @@ export const SettingsView = () => {
               <ProfileItem label="Nama Lengkap" value={displayName} icon={UserIcon} />
               <ProfileItem label="NIK" value={user?.nik} icon={Fingerprint} />
               <ProfileItem label="Email" value={user?.email} icon={Mail} />
+              <ProfileItem label="Nomor HP" value={user?.phone} icon={Phone} />
               <ProfileItem label="Jabatan" value={user?.job_title || user?.jobTitle} icon={Briefcase} />
               <ProfileItem label="Unit Kerja" value={officeName} icon={Building} highlight />
+              <ProfileItem label="Departemen" value={user?.departmentName} icon={Building} />
+              <ProfileItem label="Tanggal Masuk" value={user?.join_date} icon={CalendarDays} />
+              <ProfileItem label="Masa Kerja" value={tenureText} icon={CalendarDays} />
               <ProfileItem label="Akses Role" value={user?.role?.toUpperCase()} icon={Shield} />
             </div>
           </div>
         </motion.div>
 
-        {/* SECURITY & PREFERENCES */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
-          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="md:col-span-3 bg-card border rounded-2xl p-8 shadow-sm">
-            <div className="flex items-center gap-3 mb-6">
-              <Key className="w-5 h-5 text-orange-500" />
-              <h3 className="font-bold">Ganti Password</h3>
-            </div>
-            <form onSubmit={handleUpdatePassword} className="space-y-4">
-              <Input 
-                type="password" 
-                placeholder="Password Baru"
-                value={passwords.newPassword}
-                onChange={(e) => setPasswords({...passwords, newPassword: e.target.value})}
-              />
-              <Input 
-                type="password" 
-                placeholder="Konfirmasi Password"
-                value={passwords.confirmPassword}
-                onChange={(e) => setPasswords({...passwords, confirmPassword: e.target.value})}
-              />
-              <Button type="submit" disabled={updatingPassword} className="bg-orange-500 hover:bg-orange-600 w-full md:w-auto">
-                {updatingPassword && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                Update Password
-              </Button>
-            </form>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="md:col-span-2 bg-card border rounded-2xl p-8 shadow-sm">
-            <div className="flex items-center gap-3 mb-6">
-              <Bell className="w-5 h-5 text-blue-500" />
-              <h3 className="font-bold">Notifikasi</h3>
-            </div>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm cursor-pointer" htmlFor="email-alerts">Email Alerts</Label>
-                <Switch id="email-alerts" defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label className="text-sm cursor-pointer" htmlFor="push-notif">Push Notification</Label>
-                <Switch id="push-notif" defaultChecked />
-              </div>
-            </div>
-          </motion.div>
-        </div>
+        {/* SECURITY */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="bg-card border rounded-2xl p-8 shadow-sm"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <Key className="w-5 h-5 text-orange-500" />
+            <h3 className="font-bold">Ganti Password</h3>
+          </div>
+          <form onSubmit={handleUpdatePassword} className="space-y-4">
+            <Input 
+              type="password" 
+              placeholder="Password Baru"
+              value={passwords.newPassword}
+              onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })}
+            />
+            <Input 
+              type="password" 
+              placeholder="Konfirmasi Password"
+              value={passwords.confirmPassword}
+              onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })}
+            />
+            <Button
+              type="submit"
+              disabled={updatingPassword}
+              className="bg-orange-500 hover:bg-orange-600 w-full md:w-auto"
+            >
+              {updatingPassword && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Update Password
+            </Button>
+          </form>
+        </motion.div>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ export const adminService = {
 
   /**
    * Mengambil semua user yang aktif (deleted_at IS NULL)
-   * Dilengkapi dengan data office untuk keperluan display
+   * Dilengkapi dengan data office & master_departments untuk keperluan display
    */
   async getAllUsers() {
     const { data, error } = await supabase
@@ -17,7 +17,7 @@ export const adminService = {
       .select(`
         *,
         offices (id, name),
-        departments (id, name)
+        master_departments (id, name)
       `)
       .is('deleted_at', null)
       .order('full_name', { ascending: true });
@@ -29,26 +29,24 @@ export const adminService = {
   /**
    * Update profile user (Office, Dept, Parent, Role, dll)
    */
-async updateUserProfile(userId: string, updates: Partial<User>) {
-    // 1. Destructuring untuk memisahkan data
-    // Kita ambil field-field yang berpotensi menyebabkan error tipe data
-    const { office_id, department_id, offices, departments, ...cleanUpdates } = updates as any;
+  async updateUserProfile(userId: string, updates: Partial<User>) {
+    // 1. Destructuring untuk memisahkan data join dari kolom asli
+    const { office_id, department_id, offices, master_departments, departments, ...cleanUpdates } = updates as any;
 
     // 2. Siapkan payload final
     const payload: any = {
       ...cleanUpdates,
-      // Pastikan office_id & department_id adalah Integer (angka)
-      // Jika kosong atau string kosong, set jadi null
+      // office_id tetap integer
       office_id: office_id ? Number(office_id) : null,
-      department_id: department_id ? Number(department_id) : null,
+      // department_id sekarang uuid (string) — FK ke master_departments
+      department_id: department_id || null,
       updated_at: new Date().toISOString()
     };
 
-    // 3. Proteksi: Hapus field yang bukan kolom tabel (seperti data joinan dari query select)
-    // Seringkali objek user membawa data 'offices' atau 'departments' hasil join
-    // Jika ini dikirim balik ke .update(), Supabase akan error karena kolom itu tidak ada
+    // 3. Hapus field join yang bukan kolom tabel
     delete payload.offices;
     delete payload.departments;
+    delete payload.master_departments;
 
     const { data, error } = await supabase
       .from('profiles')
@@ -80,9 +78,6 @@ async updateUserProfile(userId: string, updates: Partial<User>) {
   // OFFICE MANAGEMENT (Skema: public.offices)
   // ==========================================
 
-  /**
-   * Tambah kantor baru sesuai skema enum office_type
-   */
   async createOffice(payload: { name: string; type: string; parent_id?: number | null }) {
     const { data, error } = await supabase
       .from('offices')
@@ -94,9 +89,6 @@ async updateUserProfile(userId: string, updates: Partial<User>) {
     return data;
   },
 
-  /**
-   * Soft delete office sesuai kolom deleted_at
-   */
   async softDeleteOffice(id: number) {
     const { error } = await supabase
       .from('offices')
@@ -107,23 +99,23 @@ async updateUserProfile(userId: string, updates: Partial<User>) {
   },
 
   // ==========================================
-  // DEPARTMENT MANAGEMENT
+  // DEPARTMENT MANAGEMENT — pakai master_departments
   // ==========================================
 
   async getAllDepartments() {
     const { data, error } = await supabase
-      .from('departments')
-      .select('*')
+      .from('master_departments')
+      .select('id, name, code')
       .order('name', { ascending: true });
 
     if (error) throw error;
     return data;
   },
 
-  async createDepartment(name: string) {
+  async createDepartment(name: string, code?: string) {
     const { data, error } = await supabase
-      .from('departments')
-      .insert([{ name }])
+      .from('master_departments')
+      .insert([{ name, ...(code ? { code } : {}) }])
       .select()
       .single();
 
@@ -131,9 +123,9 @@ async updateUserProfile(userId: string, updates: Partial<User>) {
     return data;
   },
 
-  async deleteDepartment(id: number) {
+  async deleteDepartment(id: string) {   // uuid, bukan number
     const { error } = await supabase
-      .from('departments')
+      .from('master_departments')
       .delete()
       .eq('id', id);
 

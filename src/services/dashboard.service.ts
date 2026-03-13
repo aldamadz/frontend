@@ -18,16 +18,15 @@ const STATUS_SCHEDULED: AgendaStatus[] = ['Scheduled'];
  */
 function shortenDeptName(deptName: string): string {
   const map: Record<string, string> = {
-    'Pengembangan Organisasi': 'PO',
-    'HR & GA': 'HRGA',
-    'Finance & Accounting': 'Keuangan',
-    'Marketing': 'Marketing',
-    'Business Development': 'BD',
-    'Legal Lahan': 'Legal Lahan',
-    'Legal Proyek & Humas': 'Legal Proyek',
-    'Purchasing': 'Purchasing',
-    'Perencanaan': 'Perencanaan',
-    'UMUM': 'Umum'
+    'HRD & GA':             'HRD',
+    'Keuangan & Akuntansi': 'Keuangan',
+    'Legal Lahan':          'Legal Lahan',
+    'Legal Proyek':         'Legal Proyek',
+    'Marketing':            'Marketing',
+    'Pengadaan':            'Pengadaan',
+    'Pengembangan Bisnis':  'Bisnis',
+    'Pengembangan Sistem':  'Sistem',
+    'Perencanaan':          'Perencanaan',
   };
   return map[deptName] || deptName;
 }
@@ -112,10 +111,13 @@ export async function getDashboardStats(
 
 /**
  * 5. Mengambil aktivitas per Departemen (Bar Chart)
+ * Dept yang ditampilkan disesuaikan dengan tipe kantor user yang login:
+ *   - Pusat  → dept dengan code NOT NULL (dept pusat)
+ *   - Cabang → dept dengan code IS NULL  (dept cabang, nama mengandung "(Cabang)")
  */
 export async function getDepartmentActivity(
-  startDate?: Date, 
-  endDate?: Date, 
+  startDate?: Date,
+  endDate?: Date,
   userId?: string | null,
   officeId?: string | null | number
 ): Promise<DepartmentActivity[]> {
@@ -123,39 +125,53 @@ export async function getDepartmentActivity(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
-    // 1. Ambil SEMUA Departemen dari database sebagai master list
-    const { data: allDepartments } = await supabase
-      .from('departments')
-      .select('name')
+    // 1. Cek tipe user (pusat vs cabang) dari dept-nya sendiri
+    //    Logika: dept user punya code → pusat; tidak punya code → cabang
+    const { data: currentProfile } = await supabase
+      .from('profiles')
+      .select('department_id, master_departments(code)')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const userDeptCode = (currentProfile?.master_departments as any)?.code ?? null;
+    const isPusat = userDeptCode !== null;
+
+    // 2. Ambil hanya dept yang relevan sesuai tipe user
+    const deptQuery = supabase
+      .from('master_departments')
+      .select('name, code')
       .order('name');
 
-    if (!allDepartments) return [];
+    const { data: allDepartments } = isPusat
+      ? await deptQuery.not('code', 'is', null)  // pusat: hanya dept ber-code
+      : await deptQuery.is('code', null);           // cabang: hanya dept tanpa code
 
-    // 2. Inisialisasi Grouped Object dengan nilai 0 untuk SEMUA departemen
+    if (!allDepartments || allDepartments.length === 0) return [];
+
+    // 3. Inisialisasi grouped dengan nilai 0
     const grouped: Record<string, { tasks: number; completed: number }> = {};
     allDepartments.forEach(dept => {
       grouped[dept.name] = { tasks: 0, completed: 0 };
     });
 
-    // 3. Tentukan target IDs (Hirarki atau Spesifik)
+    // 4. Tentukan target IDs (hirarki atau spesifik)
     const targetIds = await resolveTargetIds(user.id, userId);
-    
-    // 4. Ambil data agenda
+
+    // 5. Ambil data agenda
     const { data: agendas } = await fetchAgendasInternal(targetIds, startDate, endDate);
-    
-    // 5. Ambil profil untuk mapping ke departemen
+
+    // 6. Ambil profil dengan dept masing-masing
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, departments(name)')
+      .select('id, master_departments(name)')
       .in('id', targetIds);
 
-    // 6. Masukkan data agenda ke dalam master list yang sudah diinisialisasi
+    // 7. Masukkan data agenda ke grouped (hanya dept yang ada di master list)
     if (agendas) {
       agendas.forEach(agenda => {
         const profile = profiles?.find(p => p.id === agenda.created_by);
-        const deptName = (profile?.departments as any)?.name;
+        const deptName = (profile?.master_departments as any)?.name;
 
-        // Pastikan deptName ada di list master kita
         if (deptName && grouped[deptName] !== undefined) {
           grouped[deptName].tasks++;
           if (agenda.status === 'Completed') {
@@ -165,18 +181,13 @@ export async function getDepartmentActivity(
       });
     }
 
-    // 7. Filter Kantor (Opsional, jika ingin membatasi tampilan divisi tertentu di cabang)
-    const isPusat = !officeId || String(officeId) === '1' || officeId === 'all_offices';
-
     return Object.entries(grouped)
       .map(([fullName, data]) => ({
         name: shortenDeptName(fullName),
-        fullName: fullName,
+        fullName,
         tasks: data.tasks,
         completed: data.completed,
-      }))
-      // Jika di pusat, tampilkan SEMUA. Jika di cabang, filter divisi tertentu saja.
-      .filter(item => isPusat || ['Marketing', 'Perencanaan', 'Umum'].includes(item.fullName));
+      }));
 
   } catch (error) {
     console.error("Dept Activity Error:", error);

@@ -20,9 +20,6 @@ import {
 } from '@/components/ui/select';
 import { User, Role } from '@/types/agenda';
 import { updateUserProfile } from '@/services/user.service';
-import { getDepartments, Department } from '@/services/department.service';
-import { getOffices } from '@/services/office.service';
-import { Office } from '@/types/office';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import {
@@ -41,8 +38,8 @@ interface EditUserModalProps {
 
 export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: EditUserModalProps) => {
   const [loading, setLoading]       = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [offices, setOffices]         = useState<Office[]>([]);
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [offices, setOffices]         = useState<{ id: number; name: string }[]>([]);
 
   const [formData, setFormData] = useState({
     email:        '',
@@ -61,9 +58,13 @@ export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: Ed
   // Fetch master data
   useEffect(() => {
     if (!isOpen) return;
-    Promise.all([getDepartments(), getOffices()])
-      .then(([depts, offs]) => { setDepartments(depts); setOffices(offs); })
-      .catch(console.error);
+    Promise.all([
+      supabase.from('master_departments').select('id,name').order('name'),
+      supabase.from('offices').select('id,name').order('name'),
+    ]).then(([{ data: depts }, { data: offs }]) => {
+      setDepartments(depts || []);
+      setOffices(offs || []);
+    }).catch(console.error);
   }, [isOpen]);
 
   // Sync user ke form
@@ -111,7 +112,7 @@ export const EditUserModal = ({ user, allUsers, isOpen, onClose, onSuccess }: Ed
         join_date:    formData.join_date  || null,
         resign_date:  formData.resign_date || null,
         officeId:     formData.officeId     === 'none' ? null : Number(formData.officeId),
-        departmentId: formData.departmentId === 'none' ? null : Number(formData.departmentId),
+        departmentId: formData.departmentId === 'none' ? null : String(formData.departmentId),
         parentId:     formData.parentId     === 'none' ? null : formData.parentId,
       });
 
