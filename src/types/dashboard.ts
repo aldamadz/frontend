@@ -18,8 +18,10 @@ export interface DashboardStats {
 export interface KPIData {
   label: string
   value: number
+  total?: number
   change: number
   trend: 'up' | 'down' | 'neutral'
+  isProgressCard?: boolean
 }
 
 /* ======================

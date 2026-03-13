@@ -3,7 +3,8 @@ import { useState, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
-  eachDayOfInterval, isSameMonth, isSameDay, isToday, addMonths, subMonths
+  eachDayOfInterval, isSameMonth, isToday, addMonths, subMonths,
+  startOfDay, endOfDay, isWithinInterval
 } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
@@ -99,9 +100,18 @@ export const CalendarView = ({
         style={{ gridAutoRows: 'minmax(160px, 260px)' }}
       >
         {days.map((day) => {
-          const dayAgendas = processedAgendas.filter(
-            a => a.startTime && isSameDay(new Date(a.startTime), day)
-          );
+          const dayAgendas = processedAgendas.filter((a) => {
+            if (!a.startTime) return false;
+            const start = new Date(a.startTime);
+            const end = a.endTime ? new Date(a.endTime) : start;
+            if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+
+            // Tampilkan agenda pada setiap hari yang overlap dengan rentang agenda
+            return isWithinInterval(day, {
+              start: startOfDay(start),
+              end: endOfDay(end),
+            });
+          });
 
           return (
             <div

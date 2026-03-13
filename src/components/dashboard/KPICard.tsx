@@ -19,8 +19,12 @@ export const KPICard = ({ data, index }: KPICardProps) => {
 
   const { label, value, total, change, trend, isProgressCard } = data;
   const progressPercent = total && total > 0 ? (value / total) * 100 : 0;
+  const effectiveTrend: 'up' | 'down' | 'neutral' =
+    isProgressCard && progressPercent === 0 ? 'neutral' : trend;
+  const displayPercent = isProgressCard && total ? progressPercent : Math.abs(change);
+  const showPercentBadge = label !== 'Total Agenda';
 
-  const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus;
+  const TrendIcon = effectiveTrend === 'up' ? TrendingUp : effectiveTrend === 'down' ? TrendingDown : Minus;
 
   return (
     <motion.div
@@ -50,15 +54,17 @@ export const KPICard = ({ data, index }: KPICardProps) => {
           </div>
           
           {/* Badge Persentase */}
-          <div className={cn(
-            "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border",
-            trend === 'up' && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-            trend === 'down' && "bg-rose-500/10 text-rose-600 border-rose-500/20",
-            trend === 'neutral' && "bg-muted text-muted-foreground"
-          )}>
-            <TrendIcon className="w-2.5 h-2.5" />
-            <span>{Math.abs(change).toFixed(0)}%</span>
-          </div>
+          {showPercentBadge && (
+            <div className={cn(
+              "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border",
+              effectiveTrend === 'up' && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+              effectiveTrend === 'down' && "bg-rose-500/10 text-rose-600 border-rose-500/20",
+              effectiveTrend === 'neutral' && "bg-muted text-muted-foreground"
+            )}>
+              <TrendIcon className="w-2.5 h-2.5" />
+              <span>{displayPercent.toFixed(0)}%</span>
+            </div>
+          )}
         </div>
 
         {/* Value Display */}
