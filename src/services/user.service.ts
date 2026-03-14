@@ -25,7 +25,7 @@ export async function getUsers(): Promise<User[]> {
         phone, join_date, resign_date, is_active,
         office_id, department_id, parent_id,
         master_departments ( name ),
-        offices ( name )
+        master_offices ( name )
       `)
       .is('deleted_at', null)
       .order('full_name', { ascending: true });
@@ -35,7 +35,7 @@ export async function getUsers(): Promise<User[]> {
     return (data || []).map((item: any) => {
       const user   = toUIUser(item);
       const dept   = getJoinData(item.master_departments);
-      const office = getJoinData(item.offices);
+      const office = getJoinData(item.master_offices);
       return {
         ...user,
         email:          item.email,
@@ -73,11 +73,12 @@ export async function updateUserProfile(userId: string, updates: any) {
     if (updates.resign_date !== undefined) finalPayload.resign_date = updates.resign_date || null;
 
     if (updates.officeId !== undefined) {
-      finalPayload.office_id = (String(updates.officeId) === 'none' || !updates.officeId)
-        ? null : Number(updates.officeId);
+      // office_id sekarang uuid string (FK ke master_offices)
+      finalPayload.office_id = (updates.officeId === 'none' || !updates.officeId)
+        ? null : String(updates.officeId);
     }
     if (updates.departmentId !== undefined) {
-      // department_id sekarang uuid string (FK ke master_departments)
+      // department_id uuid string (FK ke master_departments)
       finalPayload.department_id = (updates.departmentId === 'none' || !updates.departmentId)
         ? null : String(updates.departmentId);
     }
@@ -112,7 +113,7 @@ export async function getSubordinates(parentId: string): Promise<User[]> {
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('*, master_departments(name), offices(name)')
+      .select('*, master_departments(name), master_offices(name)')
       .eq('parent_id', parentId);
 
     if (error) throw error;
@@ -120,7 +121,7 @@ export async function getSubordinates(parentId: string): Promise<User[]> {
     return (data || []).map((item: any) => {
       const user   = toUIUser(item);
       const dept   = getJoinData(item.master_departments);
-      const office = getJoinData(item.offices);
+      const office = getJoinData(item.master_offices);
       return {
         ...user,
         photoUrl:       item.avatar_url || user.photoUrl,
@@ -148,11 +149,11 @@ export const registerNewUser = async (userData: any) => {
           nik:           userData.nik,
           job_title:     userData.jobTitle,
           role:          userData.role || 'user',
-          // department_id uuid string
+          // department_id & office_id keduanya uuid string
           department_id: (userData.departmentId && String(userData.departmentId) !== 'none')
             ? String(userData.departmentId) : null,
           office_id:     (userData.officeId && String(userData.officeId) !== 'none')
-            ? Number(userData.officeId) : null,
+            ? String(userData.officeId) : null,
           parent_id:     (userData.parentId && userData.parentId !== 'none')
             ? userData.parentId : null,
         },

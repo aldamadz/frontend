@@ -152,7 +152,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (user && !authLoading) {
-      setSelectedOfficeId(user.officeId ? String(user.officeId) : '1');
+      setSelectedOfficeId(user.officeId ? String(user.officeId) : null);
       setSelectedUserId(user.id);
       isParentUser(user.id)
         .then(setIsParent)
@@ -189,7 +189,7 @@ const Dashboard = () => {
 
   // ── Data fetching AGENDA ──────────────────────────────────────────────────
   const queryBase = {
-    enabled: isReady && !!selectedOfficeId,
+    enabled: isReady,
     staleTime: 1000 * 60 * 5,
     placeholderData: (prev: any) => prev,
   };
@@ -254,7 +254,7 @@ const Dashboard = () => {
             Ringkasan <span className="font-light text-muted-foreground">Data</span>
           </h1>
           <p className="text-muted-foreground text-[10px] font-bold uppercase tracking-widest italic">
-            {selectedOfficeId === '1' ? 'Memantau Seluruh Aktivitas' : `Lokasi: ${user?.officeName}`}
+            {!selectedOfficeId || !user?.officeName ? 'Memantau Seluruh Aktivitas' : `Lokasi: ${user?.officeName}`}
           </p>
         </div>
 

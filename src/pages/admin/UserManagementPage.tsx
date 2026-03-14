@@ -17,14 +17,14 @@ import {
   ChevronLeft, ChevronRight, X, List,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { AddUserModal } from '@/components/users/AddUserModal';
 import { EditUserModal } from '@/components/users/EditUserModal';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -61,126 +61,6 @@ function formatDate(d?: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
-
-// ── Add User Modal ─────────────────────────────────────────────────────────────
-interface AddUserModalProps {
-  open: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-  departments: any[];
-  offices: any[];
-}
-
-const AddUserModal = ({ open, onClose, onSuccess, departments, offices }: AddUserModalProps) => {
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    email: '', full_name: '', job_title: '', phone: '',
-    role: 'user', department_id: '', office_id: '',
-    join_date: '', resign_date: '',
-  });
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }));
-
-  const handleSave = async () => {
-    if (!form.email || !form.full_name) return toast.error('Email dan nama lengkap wajib diisi');
-    setSaving(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-          body: JSON.stringify({ action: 'create', ...form }),
-        }
-      );
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      toast.success(`Akun ${form.full_name} dibuat. Password: marison123`);
-      onSuccess(); onClose();
-      setForm({ email: '', full_name: '', job_title: '', phone: '', role: 'user', department_id: '', office_id: '', join_date: '', resign_date: '' });
-    } catch (err: any) { toast.error(err.message); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl rounded-3xl p-8">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-black uppercase tracking-tight">Tambah Karyawan Baru</DialogTitle>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest mt-1">
-            Password default: <span className="text-primary font-mono bg-primary/10 px-2 py-0.5 rounded">marison123</span>
-          </p>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Nama Lengkap *</Label>
-              <Input value={form.full_name} onChange={set('full_name')} placeholder="John Doe" className="rounded-xl h-11" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Email *</Label>
-              <Input type="email" value={form.email} onChange={set('email')} placeholder="john@marison.id" className="rounded-xl h-11" />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Jabatan</Label>
-              <Input value={form.job_title} onChange={set('job_title')} placeholder="Staff" className="rounded-xl h-11" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">No. HP</Label>
-              <Input value={form.phone} onChange={set('phone')} placeholder="08xxxxxxxxxx" className="rounded-xl h-11" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Role</Label>
-              <Select value={form.role} onValueChange={v => setForm(f => ({ ...f, role: v }))}>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="finance">Finance</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Tanggal Bergabung</Label>
-              <Input type="date" value={form.join_date} onChange={set('join_date')} className="rounded-xl h-11" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Tanggal Keluar</Label>
-              <Input type="date" value={form.resign_date} onChange={set('resign_date')} className="rounded-xl h-11" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Departemen</Label>
-              <Select value={form.department_id} onValueChange={v => setForm(f => ({ ...f, department_id: v }))}>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Pilih" /></SelectTrigger>
-                <SelectContent>{departments.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase tracking-widest">Kantor</Label>
-              <Select value={form.office_id} onValueChange={v => setForm(f => ({ ...f, office_id: v }))}>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Pilih" /></SelectTrigger>
-                <SelectContent>{offices.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="rounded-2xl">Batal</Button>
-          <Button onClick={handleSave} disabled={saving} className="rounded-2xl px-8 font-black uppercase text-xs">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />} Buat Akun
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // ── Detail User Modal ──────────────────────────────────────────────────────────
 interface DetailUserModalProps {
@@ -228,9 +108,8 @@ const DetailUserModal = ({ user, open, onClose, onEdit, onToggle, togglingId }: 
   };
 
   const roleConfig = ({
-    admin:   { label: 'Admin',   cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',   icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-    finance: { label: 'Finance', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
-    user:    { label: 'User',    cls: 'bg-secondary text-muted-foreground border-border',          icon: <UserIcon className="w-3.5 h-3.5" /> },
+    admin: { label: 'Admin', cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+    user:  { label: 'User',  cls: 'bg-secondary text-muted-foreground border-border',       icon: <UserIcon className="w-3.5 h-3.5" /> },
   } as any)[role] ?? { label: role, cls: 'bg-secondary text-muted-foreground border-border', icon: <UserIcon className="w-3.5 h-3.5" /> };
 
   const Field = ({ icon, label, value, mono = false }: { icon: React.ReactNode; label: string; value?: string | null; mono?: boolean }) => (
@@ -291,12 +170,12 @@ const DetailUserModal = ({ user, open, onClose, onEdit, onToggle, togglingId }: 
               <p className="text-[9px] font-black uppercase tracking-widest text-primary mb-2 flex items-center gap-2">
                 <Info className="w-3 h-3" /> Data Karyawan
               </p>
-              <Field icon={<Mail className="w-3.5 h-3.5" />}       label="Email"      value={user.email} mono />
-              <Field icon={<Hash className="w-3.5 h-3.5" />}        label="NIK"        value={user.nik} mono />
-              <Field icon={<Phone className="w-3.5 h-3.5" />}       label="No. HP"     value={(user as any).phone} />
-              <Field icon={<Briefcase className="w-3.5 h-3.5" />}   label="Jabatan"    value={user.jobTitle} />
-              <Field icon={<Building2 className="w-3.5 h-3.5" />}   label="Departemen" value={user.departmentName} />
-              <Field icon={<MapPin className="w-3.5 h-3.5" />}      label="Kantor"     value={user.officeName} />
+              <Field icon={<Mail className="w-3.5 h-3.5" />}      label="Email"      value={user.email} mono />
+              <Field icon={<Hash className="w-3.5 h-3.5" />}      label="NIK"        value={user.nik} mono />
+              <Field icon={<Phone className="w-3.5 h-3.5" />}     label="No. HP"     value={(user as any).phone} />
+              <Field icon={<Briefcase className="w-3.5 h-3.5" />} label="Jabatan"    value={user.jobTitle} />
+              <Field icon={<Building2 className="w-3.5 h-3.5" />} label="Departemen" value={user.departmentName} />
+              <Field icon={<MapPin className="w-3.5 h-3.5" />}    label="Kantor"     value={user.officeName} />
             </div>
             <div className="space-y-4">
               <div>
@@ -368,7 +247,7 @@ const DetailUserModal = ({ user, open, onClose, onEdit, onToggle, togglingId }: 
         <div className="px-7 py-4 border-t border-border bg-muted/10 flex flex-wrap gap-2">
           <Button
             variant="outline"
-            onClick={() => { onToggle(user); }}
+            onClick={() => onToggle(user)}
             disabled={isToggling}
             className={cn(
               "flex-1 h-10 rounded-xl font-black uppercase text-[10px] tracking-widest",
@@ -399,10 +278,8 @@ const DetailUserModal = ({ user, open, onClose, onEdit, onToggle, togglingId }: 
   );
 };
 
-// ── Email contoh bawaan template — dilewati saat import ───────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 const TEMPLATE_EXAMPLE_EMAILS = new Set(['budi@marison.id', 'siti@marison.id']);
-
-// ── Page size options ─────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
@@ -418,12 +295,8 @@ export default function UserManagementPage() {
   const [isAddOpen, setIsAddOpen]       = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [togglingId, setTogglingId]     = useState<string | null>(null);
-  const [departments, setDepartments]   = useState<any[]>([]);
-  const [offices, setOffices]           = useState<any[]>([]);
   const [bulkLoading, setBulkLoading]   = useState(false);
-  // ── Multiselect ────────────────────────────────────────────────────────────
   const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
-  // ── Pagination ─────────────────────────────────────────────────────────────
   const [page, setPage]         = useState(1);
   const [pageSize, setPageSize] = useState<number | 'all'>(10);
   const importRef = useRef<HTMLInputElement>(null);
@@ -435,11 +308,7 @@ export default function UserManagementPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchUsers();
-    supabase.from('master_departments').select('id,name').order('name').then(({ data }) => setDepartments(data || []));
-    supabase.from('offices').select('id,name').order('name').then(({ data }) => setOffices(data || []));
-  }, []);
+  useEffect(() => { fetchUsers(); }, []);
 
   const uniqueOffices = useMemo(() =>
     Array.from(new Set(users.map(u => u.officeName).filter(Boolean))).sort() as string[], [users]);
@@ -453,19 +322,15 @@ export default function UserManagementPage() {
       || (u.jobTitle?.toLowerCase() || '').includes(s)
       || (u.nik?.toLowerCase() || '').includes(s)
       || ((u as any).phone?.toLowerCase() || '').includes(s);
-    const officeOk = officeFilter === 'all' || u.officeName === officeFilter;
-    const deptOk   = deptFilter   === 'all' || u.departmentName === deptFilter;
     const isActive = (u as any).is_active !== false;
-    const statusOk = statusFilter === 'all'
-      || (statusFilter === 'active'   && isActive)
-      || (statusFilter === 'inactive' && !isActive);
-    return ok && officeOk && deptOk && statusOk;
+    return ok
+      && (officeFilter === 'all' || u.officeName === officeFilter)
+      && (deptFilter   === 'all' || u.departmentName === deptFilter)
+      && (statusFilter === 'all' || (statusFilter === 'active' ? isActive : !isActive));
   }), [users, searchQuery, officeFilter, deptFilter, statusFilter]);
 
-  // Reset ke halaman 1 saat filter / pageSize berubah
   useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [searchQuery, officeFilter, deptFilter, statusFilter, pageSize]);
 
-  // ── Pagination derived ─────────────────────────────────────────────────────
   const showAll    = pageSize === 'all';
   const totalPages = showAll ? 1 : Math.max(1, Math.ceil(filteredUsers.length / (pageSize as number)));
   const pagedUsers = useMemo(() =>
@@ -475,7 +340,6 @@ export default function UserManagementPage() {
     [filteredUsers, page, pageSize, showAll]
   );
 
-  // ── Multiselect helpers ────────────────────────────────────────────────────
   const allPageSelected  = pagedUsers.length > 0 && pagedUsers.every(u => selectedIds.has(u.id));
   const somePageSelected = pagedUsers.some(u => selectedIds.has(u.id));
 
@@ -499,7 +363,6 @@ export default function UserManagementPage() {
   const clearSelection = () => setSelectedIds(new Set());
   const selectedUsers  = useMemo(() => users.filter(u => selectedIds.has(u.id)), [users, selectedIds]);
 
-  // ── Bulk actions ───────────────────────────────────────────────────────────
   const getToken = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.access_token ?? '';
@@ -546,7 +409,6 @@ export default function UserManagementPage() {
     clearSelection();
   };
 
-  // ── Toggle active ──────────────────────────────────────────────────────────
   const handleToggle = async (user: User) => {
     const newVal = !(user as any).is_active;
     setTogglingId(user.id);
@@ -565,7 +427,6 @@ export default function UserManagementPage() {
     finally { setTogglingId(null); }
   };
 
-  // ── Download template ──────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
     const link = document.createElement('a');
     link.href = '/templates/template_import_karyawan.xlsx';
@@ -573,7 +434,6 @@ export default function UserManagementPage() {
     link.click();
   };
 
-  // ── Export XLSX ────────────────────────────────────────────────────────────
   const handleExport = () => {
     const rows = filteredUsers.map((u, idx) => ({
       'No':            idx + 1,
@@ -590,73 +450,19 @@ export default function UserManagementPage() {
       'Masa Kerja':    getMasaKerja((u as any).join_date, (u as any).resign_date),
       'Status':        (u as any).is_active === false ? 'Nonaktif' : 'Aktif',
     }));
-
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [
       { wch: 5 }, { wch: 28 }, { wch: 32 }, { wch: 16 }, { wch: 18 },
       { wch: 22 }, { wch: 12 }, { wch: 24 }, { wch: 20 },
       { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
     ];
-
-    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const addr = XLSX.utils.encode_cell({ r: 0, c: C });
-      if (!ws[addr]) continue;
-      ws[addr].s = {
-        font:      { bold: true, color: { rgb: 'FFFFFF' }, name: 'Arial', sz: 10 },
-        fill:      { patternType: 'solid', fgColor: { rgb: '4F46E5' } },
-        alignment: { horizontal: 'center', vertical: 'center' },
-      };
-    }
-    for (let R = 1; R <= rows.length; R++) {
-      const isEven = R % 2 === 0;
-      for (let C = range.s.c; C <= range.e.c; C++) {
-        const addr = XLSX.utils.encode_cell({ r: R, c: C });
-        if (!ws[addr]) continue;
-        ws[addr].s = {
-          font: { name: 'Arial', sz: 10 },
-          fill: { patternType: 'solid', fgColor: { rgb: isEven ? 'F5F3FF' : 'FFFFFF' } },
-          alignment: { vertical: 'center' },
-        };
-      }
-      const statusAddr = XLSX.utils.encode_cell({ r: R, c: 12 });
-      if (ws[statusAddr]) {
-        const isAktif = ws[statusAddr].v === 'Aktif';
-        ws[statusAddr].s = {
-          ...ws[statusAddr].s,
-          font: { name: 'Arial', sz: 10, bold: true, color: { rgb: isAktif ? '059669' : 'DC2626' } },
-        };
-      }
-    }
     ws['!rows'] = [{ hpt: 28 }];
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Data Karyawan');
-
-    const summaryData = [
-      ['LAPORAN DATA KARYAWAN'],
-      ['Tanggal Export', new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })],
-      [''],
-      ['Total Karyawan',    rows.length],
-      ['Karyawan Aktif',    rows.filter(r => r['Status'] === 'Aktif').length],
-      ['Karyawan Nonaktif', rows.filter(r => r['Status'] === 'Nonaktif').length],
-      [''],
-      ['Filter Aktif', [
-        searchQuery      ? `Cari: "${searchQuery}"` : '',
-        officeFilter !== 'all' ? `Kantor: ${officeFilter}` : '',
-        deptFilter   !== 'all' ? `Dept: ${deptFilter}` : '',
-        statusFilter !== 'all' ? `Status: ${statusFilter}` : '',
-      ].filter(Boolean).join(', ') || 'Semua data'],
-    ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 22 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan');
-
     XLSX.writeFile(wb, `karyawan_${new Date().toISOString().slice(0, 10)}.xlsx`);
     toast.success(`${rows.length} data diekspor ke Excel`);
   };
 
-  // ── Import XLSX / CSV ──────────────────────────────────────────────────────
   const parseXlsxToRows = (file: File): Promise<string[][]> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -665,8 +471,7 @@ export default function UserManagementPage() {
           const data = new Uint8Array(ev.target!.result as ArrayBuffer);
           const wb   = XLSX.read(data, { type: 'array' });
           const ws   = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][];
-          resolve(rows);
+          resolve(XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][]);
         } catch (err) { reject(err); }
       };
       reader.onerror = reject;
@@ -684,7 +489,11 @@ export default function UserManagementPage() {
       const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
       if (isXlsx) {
         const allRows = await parseXlsxToRows(file);
-        for (let i = 3; i < allRows.length; i++) {
+        const headerRowIdx = allRows.findIndex(r =>
+          r.some(c => typeof c === 'string' && ['email', 'nama', 'name'].includes(String(c).trim().toLowerCase().replace(' *', '')))
+        );
+        const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 3;
+        for (let i = startIdx; i < allRows.length; i++) {
           const r = allRows[i].map(v => String(v ?? '').trim());
           const [nik, full_name, phone, email, join_date, resign_date, job_title, role] = r;
           if (!email && !full_name) continue;
@@ -708,9 +517,7 @@ export default function UserManagementPage() {
       return toast.error('Gagal membaca file. Pastikan format file benar.');
     }
 
-    if (dataRows.length === 0) {
-      return toast.warning('Tidak ada data valid untuk diimpor. Baris contoh template dilewati otomatis.');
-    }
+    if (dataRows.length === 0) return toast.warning('Tidak ada data valid untuk diimpor.');
 
     let ok = 0, fail = 0;
     const { data: { session } } = await supabase.auth.getSession();
@@ -727,7 +534,7 @@ export default function UserManagementPage() {
             full_name:   row.full_name,
             job_title:   row.job_title   || null,
             phone:       row.phone       || null,
-            role:        row.role        || 'user',
+            role:        ['admin','user'].includes((row.role||'').toLowerCase()) ? row.role.toLowerCase() : 'user',
             join_date:   row.join_date   || null,
             resign_date: row.resign_date || null,
           }),
@@ -762,8 +569,7 @@ export default function UserManagementPage() {
           <StatPill icon={<Users className="w-4 h-4" />}        label="Total"    value={users.length}  cls="bg-primary/10 text-primary border-primary/20" />
           <StatPill icon={<CheckCircle2 className="w-4 h-4" />} label="Aktif"    value={activeCount}   cls="bg-emerald-500/10 text-emerald-500 border-emerald-500/20" />
           {inactiveCount > 0 && <StatPill icon={<XCircle className="w-4 h-4" />} label="Nonaktif" value={inactiveCount} cls="bg-red-500/10 text-red-500 border-red-500/20" />}
-
-          <Button variant="outline" onClick={handleDownloadTemplate} title="Download Template Excel"
+          <Button variant="outline" onClick={handleDownloadTemplate}
             className="h-10 gap-2 font-bold text-xs uppercase rounded-xl border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
             <FileSpreadsheet className="w-4 h-4" /> Template
           </Button>
@@ -905,10 +711,6 @@ export default function UserManagementPage() {
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                         <ShieldCheck className="w-3 h-3" /> Admin
                       </span>
-                    ) : (user as any).role === 'finance' ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <CheckCircle2 className="w-3 h-3" /> Finance
-                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-secondary text-muted-foreground border border-border">
                         <UserIcon className="w-3 h-3" /> User
@@ -988,8 +790,7 @@ export default function UserManagementPage() {
             </Button>
           </div>
           <div className="flex-1" />
-          <Button size="sm" variant="ghost" onClick={clearSelection}
-            className="h-8 w-8 p-0 rounded-xl hover:bg-destructive/10">
+          <Button size="sm" variant="ghost" onClick={clearSelection} className="h-8 w-8 p-0 rounded-xl hover:bg-destructive/10">
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -998,8 +799,6 @@ export default function UserManagementPage() {
       {/* ── Pagination ───────────────────────────────────────────────────────── */}
       {!loading && filteredUsers.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
-
-          {/* Kiri: info jumlah + page size selector */}
           <div className="flex items-center gap-3 flex-wrap">
             <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
               {showAll
@@ -1008,32 +807,22 @@ export default function UserManagementPage() {
               {filteredUsers.length !== users.length && ` (total ${users.length})`}
               {selectedIds.size > 0 && <span className="text-primary"> · {selectedIds.size} dipilih</span>}
             </p>
-
-            {/* ── Page size selector ──────────────────────────────────────── */}
             <div className="flex items-center gap-1.5 bg-muted/40 border border-border rounded-xl px-2.5 py-1">
               <List className="w-3 h-3 text-muted-foreground shrink-0" />
-              <Select
-                value={String(pageSize)}
-                onValueChange={v => setPageSize(v === 'all' ? 'all' : Number(v))}
-              >
+              <Select value={String(pageSize)} onValueChange={v => setPageSize(v === 'all' ? 'all' : Number(v))}>
                 <SelectTrigger className="h-6 border-0 bg-transparent p-0 pr-5 text-[10px] font-black uppercase focus:ring-0 focus:ring-offset-0 w-auto min-w-[64px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="start">
                   {PAGE_SIZE_OPTIONS.map(n => (
-                    <SelectItem key={n} value={String(n)} className="text-[11px] font-bold">
-                      {n} / halaman
-                    </SelectItem>
+                    <SelectItem key={n} value={String(n)} className="text-[11px] font-bold">{n} / halaman</SelectItem>
                   ))}
-                  <SelectItem value="all" className="text-[11px] font-bold text-primary">
-                    Tampilkan Semua
-                  </SelectItem>
+                  <SelectItem value="all" className="text-[11px] font-bold text-primary">Tampilkan Semua</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* Kanan: navigasi halaman (disembunyikan saat mode "Semua") */}
           {!showAll && (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
@@ -1043,10 +832,7 @@ export default function UserManagementPage() {
                 <Button variant="outline" size="sm" onClick={() => setPage(1)} disabled={page === 1}
                   className="h-8 w-8 p-0 rounded-lg text-xs font-bold">1</Button>
                 <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                  className="h-8 w-8 p-0 rounded-lg">
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-
+                  className="h-8 w-8 p-0 rounded-lg"><ChevronLeft className="w-4 h-4" /></Button>
                 {Array.from({ length: totalPages }, (_, i) => i + 1)
                   .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
                   .reduce<(number | '...')[]>((acc, p, idx, arr) => {
@@ -1055,19 +841,13 @@ export default function UserManagementPage() {
                     return acc;
                   }, [])
                   .map((p, i) => p === '...'
-                    ? <span key={`ellipsis-${i}`} className="text-xs text-muted-foreground px-1">…</span>
+                    ? <span key={`e-${i}`} className="text-xs text-muted-foreground px-1">…</span>
                     : <Button key={p} variant={page === p ? 'default' : 'outline'} size="sm"
                         onClick={() => setPage(p as number)}
-                        className="h-8 w-8 p-0 rounded-lg text-xs font-bold">
-                        {p}
-                      </Button>
-                  )
-                }
-
+                        className="h-8 w-8 p-0 rounded-lg text-xs font-bold">{p}</Button>
+                  )}
                 <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                  className="h-8 w-8 p-0 rounded-lg">
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
+                  className="h-8 w-8 p-0 rounded-lg"><ChevronRight className="w-4 h-4" /></Button>
                 <Button variant="outline" size="sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}
                   className="h-8 w-8 p-0 rounded-lg text-xs font-bold">{totalPages}</Button>
               </div>
@@ -1076,7 +856,13 @@ export default function UserManagementPage() {
         </div>
       )}
 
-      <AddUserModal open={isAddOpen} onClose={() => setIsAddOpen(false)} onSuccess={fetchUsers} departments={departments} offices={offices} />
+      {/* ── Modals ──────────────────────────────────────────────────────────── */}
+      <AddUserModal
+        isOpen={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        onSuccess={fetchUsers}
+        allUsers={users}
+      />
       <DetailUserModal
         user={selectedUser}
         open={isDetailOpen}
@@ -1085,7 +871,13 @@ export default function UserManagementPage() {
         onToggle={handleToggle}
         togglingId={togglingId}
       />
-      <EditUserModal user={selectedUser} allUsers={users} isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSuccess={fetchUsers} />
+      <EditUserModal
+        user={selectedUser}
+        allUsers={users}
+        isOpen={isEditOpen}
+        onClose={() => setIsEditOpen(false)}
+        onSuccess={fetchUsers}
+      />
     </div>
   );
 }

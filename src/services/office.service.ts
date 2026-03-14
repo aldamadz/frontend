@@ -1,16 +1,22 @@
 // frontend/src/services/office.service.ts
 import { supabase } from '@/lib/supabase';
-import { Office, OfficeType } from '@/types/office'; 
+
+export interface MasterOffice {
+  id: string;        // uuid
+  code: string;
+  name: string;
+  kedudukan: string | null;  // 'Pusat' | 'KC' | 'KCP'
+  parent_id: string | null;
+}
 
 /**
- * 1. Mengambil semua data kantor yang aktif
+ * Mengambil semua kantor dari master_offices
  */
-export async function getOffices(): Promise<Office[]> {
+export async function getOffices(): Promise<MasterOffice[]> {
   const { data, error } = await supabase
-    .from('offices')
-    .select('*')
-    .is('deleted_at', null)
-    .order('id', { ascending: true });
+    .from('master_offices')
+    .select('id, code, name, kedudukan, parent_id')
+    .order('name', { ascending: true });
 
   if (error) {
     console.error('Error fetching offices:', error);
@@ -20,24 +26,21 @@ export async function getOffices(): Promise<Office[]> {
 }
 
 /**
- * 2. Mengambil kantor beserta turunannya (Rekursif)
- * Fungsi ini yang menyebabkan error jika tidak di-export
+ * Mengambil kantor beserta turunannya (rekursif di memori)
  */
-export async function getOfficeWithDescendants(officeId: number): Promise<Office[]> {
+export async function getOfficeWithDescendants(officeId: string): Promise<MasterOffice[]> {
   const allOffices = await getOffices();
-  const result: Office[] = [];
+  const result: MasterOffice[] = [];
 
-  // Cari kantor target
   const target = allOffices.find(o => o.id === officeId);
   if (target) result.push(target);
 
-  // Fungsi internal untuk menelusuri anak
-  function walk(parentId: number) {
+  function walk(parentId: string) {
     allOffices
       .filter(o => o.parent_id === parentId)
       .forEach(child => {
         result.push(child);
-        walk(child.id); // Rekursi ke bawah
+        walk(child.id);
       });
   }
 
@@ -46,11 +49,16 @@ export async function getOfficeWithDescendants(officeId: number): Promise<Office
 }
 
 /**
- * 3. Tambah Kantor Baru
+ * Tambah kantor baru
  */
-export async function createOffice(payload: { name: string; type: OfficeType; parent_id?: number | null }) {
+export async function createOffice(payload: {
+  name: string;
+  kedudukan?: string;
+  code?: string;
+  parent_id?: string | null;
+}) {
   const { data, error } = await supabase
-    .from('offices')
+    .from('master_offices')
     .insert([payload])
     .select()
     .single();
@@ -60,12 +68,12 @@ export async function createOffice(payload: { name: string; type: OfficeType; pa
 }
 
 /**
- * 4. Soft Delete Kantor
+ * Hapus kantor
  */
-export async function softDeleteOffice(id: number) {
+export async function deleteOffice(id: string) {
   const { error } = await supabase
-    .from('offices')
-    .update({ deleted_at: new Date().toISOString() })
+    .from('master_offices')
+    .delete()
     .eq('id', id);
 
   if (error) throw error;

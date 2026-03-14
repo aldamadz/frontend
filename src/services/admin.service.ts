@@ -7,17 +7,13 @@ export const adminService = {
   // USER MANAGEMENT
   // ==========================================
 
-  /**
-   * Mengambil semua user yang aktif (deleted_at IS NULL)
-   * Dilengkapi dengan data office & master_departments untuk keperluan display
-   */
   async getAllUsers() {
     const { data, error } = await supabase
       .from('profiles')
       .select(`
         *,
-        offices (id, name),
-        master_departments (id, name)
+        master_offices ( id, name, kedudukan ),
+        master_departments ( id, name )
       `)
       .is('deleted_at', null)
       .order('full_name', { ascending: true });
@@ -26,25 +22,21 @@ export const adminService = {
     return data;
   },
 
-  /**
-   * Update profile user (Office, Dept, Parent, Role, dll)
-   */
   async updateUserProfile(userId: string, updates: Partial<User>) {
-    // 1. Destructuring untuk memisahkan data join dari kolom asli
-    const { office_id, department_id, offices, master_departments, departments, ...cleanUpdates } = updates as any;
+    const { office_id, department_id, offices, master_offices, departments, master_departments, ...cleanUpdates } = updates as any;
 
-    // 2. Siapkan payload final
     const payload: any = {
       ...cleanUpdates,
-      // office_id tetap integer
-      office_id: office_id ? Number(office_id) : null,
-      // department_id sekarang uuid (string) — FK ke master_departments
-      department_id: department_id || null,
-      updated_at: new Date().toISOString()
+      // office_id uuid string (FK ke master_offices)
+      office_id:     office_id     ? String(office_id)     : null,
+      // department_id uuid string (FK ke master_departments)
+      department_id: department_id ? String(department_id) : null,
+      updated_at: new Date().toISOString(),
     };
 
-    // 3. Hapus field join yang bukan kolom tabel
+    // Hapus field join yang bukan kolom tabel
     delete payload.offices;
+    delete payload.master_offices;
     delete payload.departments;
     delete payload.master_departments;
 
@@ -56,15 +48,12 @@ export const adminService = {
       .single();
 
     if (error) {
-      console.error("Payload yang menyebabkan error:", payload);
+      console.error('Payload yang menyebabkan error:', payload);
       throw error;
     }
     return data;
   },
 
-  /**
-   * Soft delete user agar tidak bisa login namun history tetap ada
-   */
   async softDeleteUser(userId: string) {
     const { error } = await supabase
       .from('profiles')
@@ -75,12 +64,22 @@ export const adminService = {
   },
 
   // ==========================================
-  // OFFICE MANAGEMENT (Skema: public.offices)
+  // OFFICE MANAGEMENT — pakai master_offices (uuid PK)
   // ==========================================
 
-  async createOffice(payload: { name: string; type: string; parent_id?: number | null }) {
+  async getAllOffices() {
     const { data, error } = await supabase
-      .from('offices')
+      .from('master_offices')
+      .select('id, name, kedudukan, code, parent_id')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  },
+
+  async createOffice(payload: { name: string; kedudukan?: string; code?: string; parent_id?: string | null }) {
+    const { data, error } = await supabase
+      .from('master_offices')
       .insert([payload])
       .select()
       .single();
@@ -89,10 +88,10 @@ export const adminService = {
     return data;
   },
 
-  async softDeleteOffice(id: number) {
+  async deleteOffice(id: string) {   // uuid, bukan integer
     const { error } = await supabase
-      .from('offices')
-      .update({ deleted_at: new Date().toISOString() })
+      .from('master_offices')
+      .delete()
       .eq('id', id);
 
     if (error) throw error;
@@ -123,12 +122,12 @@ export const adminService = {
     return data;
   },
 
-  async deleteDepartment(id: string) {   // uuid, bukan number
+  async deleteDepartment(id: string) {   // uuid
     const { error } = await supabase
       .from('master_departments')
       .delete()
       .eq('id', id);
 
     if (error) throw error;
-  }
+  },
 };
