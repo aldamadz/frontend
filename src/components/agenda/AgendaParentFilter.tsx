@@ -35,7 +35,7 @@ export function AgendaParentFilter({
   const { data: offices = [] } = useQuery({
     queryKey: ['offices-list'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('offices').select('id, name').order('name');
+      const { data, error } = await supabase.from('master_offices').select('id, name').order('name');
       if (error) throw error;
       return data;
     }

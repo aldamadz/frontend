@@ -25,7 +25,7 @@ export const useAuth = () => {
         .from('profiles')
         .select(`
           *,
-          offices (name)
+          master_offices (name)
         `)
         .eq('id', sessionUser.id)
         .single();
@@ -38,7 +38,7 @@ export const useAuth = () => {
         const fullUser = {
           ...toUIUser(profile),
           email: sessionUser.email,
-          officeName: profile.offices?.name
+          officeName: profile.master_offices?.name
         };
         setUser(fullUser);
       }
